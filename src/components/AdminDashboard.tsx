@@ -157,9 +157,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
             {/* QR Pairing Code Display */}
             <div className="p-4 rounded-2xl bg-black/50 border border-white/10 flex flex-col items-center text-center my-4">
-              <span className="text-xs font-bold text-slate-300 mb-2">
+              <span className="text-xs font-bold text-slate-300 mb-1">
                 Scan QR Code on WhatsApp Phone (+231889792996)
               </span>
+              <p className="text-[11px] text-amber-300/90 mb-3 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
+                💡 <strong>Tip for "Invalid QR Code":</strong> Ensure you are using official WhatsApp (not GBWhatsApp) under <strong>Settings &gt; Linked Devices &gt; Link a Device</strong>. If scanning fails, click <strong>Refresh Pairing QR</strong> below for a fresh 30-second token.
+              </p>
 
               {isLoadingQr ? (
                 <div className="w-48 h-48 flex items-center justify-center text-cyan-400">
@@ -175,10 +178,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
 
               <button
                 onClick={fetchQrCode}
-                className="mt-3 px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-xs text-slate-300 flex items-center gap-1"
+                className="mt-3 px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-bold text-xs border border-cyan-500/30 flex items-center gap-1.5 transition-all cursor-pointer"
               >
-                <RefreshCw className="w-3 h-3" />
-                <span>Refresh Pairing QR</span>
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Refresh Pairing QR Code</span>
               </button>
             </div>
 
