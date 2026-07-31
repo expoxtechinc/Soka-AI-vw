@@ -1,0 +1,94 @@
+{
+  "entities": {
+    "users": {
+      "title": "User Profile",
+      "description": "User identity and role metadata",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "User ID matching auth.uid"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of user",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "Email address of user",
+          "maxLength": 150
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Avatar image URL",
+          "maxLength": 500
+        },
+        "role": {
+          "type": "string",
+          "description": "Account permission role",
+          "enum": ["user", "admin"]
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when account was registered"
+        }
+      },
+      "required": ["id", "name", "email", "role", "createdAt"]
+    },
+    "chatMessages": {
+      "title": "Chat Message",
+      "description": "Chat message history item stored in Firestore",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique message ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user ID matching auth.uid"
+        },
+        "role": {
+          "type": "string",
+          "description": "Sender role",
+          "enum": ["user", "assistant"]
+        },
+        "category": {
+          "type": "string",
+          "description": "AI tool/category used for chat",
+          "maxLength": 50
+        },
+        "content": {
+          "type": "string",
+          "description": "Text body of the message",
+          "maxLength": 10000
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "Timestamp string"
+        },
+        "modelUsed": {
+          "type": "string",
+          "description": "AI model name that answered",
+          "maxLength": 100
+        }
+      },
+      "required": ["id", "userId", "role", "content", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/users"
+      },
+      "description": "User profiles indexed by auth UID"
+    },
+    "/users/{userId}/messages/{messageId}": {
+      "schema": {
+        "$ref": "#/entities/chatMessages"
+      },
+      "description": "User private chat message log subcollection"
+    }
+  }
+}

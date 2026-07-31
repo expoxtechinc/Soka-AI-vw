@@ -1,0 +1,6 @@
+{
+  "name": "Soka AI",
+  "description": "Futuristic Mobile-First AI Assistant and Multi-Model Router Platform",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

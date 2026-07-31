@@ -1,0 +1,58 @@
+import { AITool } from '../types';
+
+export const AI_TOOLS: AITool[] = [
+  {
+    id: 'generate-visuals',
+    title: 'Generate Visuals',
+    description: 'Transform prompts into high-definition digital artwork, avatars, and UI concepts.',
+    iconName: 'Image',
+    category: 'AI Photo',
+    accentColor: 'from-cyan-500 to-blue-600',
+    badge: 'Gemini 3.1',
+  },
+  {
+    id: 'translator',
+    title: 'Translator',
+    description: 'Instant multi-language translation with cultural nuance and audio pronunciation.',
+    iconName: 'Languages',
+    category: 'Translator',
+    accentColor: 'from-blue-500 to-purple-600',
+    badge: 'Instant',
+  },
+  {
+    id: 'pdf-scanner',
+    title: 'Document Scanner',
+    description: 'Upload PDFs or docs for instant key point extraction, summaries, and Q&A.',
+    iconName: 'FileText',
+    category: 'PDF Scanner',
+    accentColor: 'from-purple-500 to-pink-600',
+    badge: 'PDF / OCR',
+  },
+  {
+    id: 'ai-writer',
+    title: 'AI Writer',
+    description: 'Draft essays, blogs, emails, and social content with customizable tone.',
+    iconName: 'PenTool',
+    category: 'AI Chat',
+    accentColor: 'from-emerald-400 to-teal-600',
+    badge: 'Pro Text',
+  },
+  {
+    id: 'coding-assistant',
+    title: 'Coding Assistant',
+    description: 'Write, debug, and refactor code in TypeScript, Python, React, and SQL.',
+    iconName: 'Code2',
+    category: 'Coding',
+    accentColor: 'from-cyan-400 to-indigo-600',
+    badge: 'Groq Llama 3.3',
+  },
+  {
+    id: 'study-helper',
+    title: 'Study Helper',
+    description: 'Step-by-step tutoring, concept breakdowns, flashcards, and practice quizzes.',
+    iconName: 'GraduationCap',
+    category: 'Assistant',
+    accentColor: 'from-violet-500 to-fuchsia-600',
+    badge: 'Tutor',
+  },
+];

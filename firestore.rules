@@ -1,0 +1,89 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Deny All Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email == 'aki.sokpah.link@gmail.com' && request.auth.token.email_verified == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Helpers ---
+    function isValidUser(data, userId) {
+      return data.keys().hasAll(['id', 'name', 'email', 'role', 'createdAt']) &&
+             data.keys().size() <= 6 &&
+             data.id == userId &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.email is string && data.email.size() > 0 && data.email.size() <= 150 &&
+             data.role is string && (data.role == 'user' || data.role == 'admin') &&
+             data.createdAt is string && data.createdAt.size() <= 50 &&
+             // Prevent non-admins from self-assigning admin role
+             (data.role != 'admin' || isAdmin());
+    }
+
+    function isValidMessage(data, userId) {
+      return data.keys().hasAll(['id', 'userId', 'role', 'content', 'timestamp']) &&
+             data.keys().size() <= 7 &&
+             data.id is string && data.id.size() <= 128 &&
+             data.userId == userId &&
+             data.role is string && (data.role == 'user' || data.role == 'assistant') &&
+             data.content is string && data.content.size() <= 10000 &&
+             data.timestamp is string && data.timestamp.size() <= 50 &&
+             (!('category' in data) || (data.category is string && data.category.size() <= 50)) &&
+             (!('modelUsed' in data) || (data.modelUsed is string && data.modelUsed.size() <= 100));
+    }
+
+    // --- User Collection Match Block ---
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isAdmin();
+      
+      allow create: if isValidId(userId) && isOwner(userId) && isValidUser(incoming(), userId);
+      
+      allow update: if isValidId(userId) && isOwner(userId) &&
+                       isValidUser(incoming(), userId) &&
+                       incoming().id == existing().id &&
+                       incoming().createdAt == existing().createdAt &&
+                       (existing().role == incoming().role || isAdmin());
+
+      allow delete: if isValidId(userId) && (isOwner(userId) || isAdmin());
+
+      // --- Nested User Chat Messages Subcollection ---
+      match /messages/{messageId} {
+        allow get, list: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
+        allow create: if isValidId(userId) && isValidId(messageId) && isOwner(userId) && isValidMessage(incoming(), userId);
+        allow update: if isValidId(userId) && isValidId(messageId) && isOwner(userId) && isValidMessage(incoming(), userId) && incoming().id == existing().id;
+        allow delete: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
+      }
+    }
+
+  }
+}

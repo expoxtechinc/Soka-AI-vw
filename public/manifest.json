@@ -1,0 +1,25 @@
+{
+  "name": "Soka AI",
+  "short_name": "Soka AI",
+  "description": "Next-generation multi-model AI assistant, document scanner, visual generator, and 24/7 WhatsApp bot hub.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#010209",
+  "theme_color": "#010209",
+  "icons": [
+    {
+      "src": "https://cdn.phototourl.com/free/2026-07-31-00e9c962-b18e-4b0d-9def-a1d53246cb53.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://cdn.phototourl.com/free/2026-07-31-00e9c962-b18e-4b0d-9def-a1d53246cb53.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["utilities", "productivity", "artificial-intelligence"]
+}
