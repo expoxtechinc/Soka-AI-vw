@@ -88,7 +88,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       setSimReply(data.botReply);
       fetchStatus();
     } catch (err) {
-      setSimReply('🤖 Soka AI WhatsApp Bot (+231889792996): Hello! I am online and responding to mentions in groups.');
+      setSimReply('🤖 Soka AI WhatsApp Bot (+231 88 988 3943): Hello! I am online and responding to mentions in groups.');
     } finally {
       setIsSimulating(false);
     }
@@ -128,7 +128,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
       {/* Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* Card 1: WhatsApp 24/7 Server Engine (+231889792996) */}
+        {/* Card 1: WhatsApp 24/7 Server Engine (+231889883943) */}
         <div className="p-6 rounded-3xl bg-[#080d1a] border border-emerald-500/30 shadow-[0_0_40px_rgba(16,185,129,0.15)] flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between mb-4">
@@ -138,7 +138,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-white">WhatsApp Bot Server</h3>
-                  <p className="text-xs font-mono text-cyan-300">+231889792996</p>
+                  <p className="text-xs font-mono text-cyan-300">+231 88 988 3943</p>
                 </div>
               </div>
 
@@ -158,7 +158,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onBack }) => {
             {/* QR Pairing Code Display */}
             <div className="p-4 rounded-2xl bg-black/50 border border-white/10 flex flex-col items-center text-center my-4">
               <span className="text-xs font-bold text-slate-300 mb-1">
-                Scan QR Code on WhatsApp Phone (+231889792996)
+                Scan QR Code on WhatsApp Phone (+231 88 988 3943)
               </span>
               <p className="text-[11px] text-amber-300/90 mb-3 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
                 💡 <strong>Tip for "Invalid QR Code":</strong> Ensure you are using official WhatsApp (not GBWhatsApp) under <strong>Settings &gt; Linked Devices &gt; Link a Device</strong>. If scanning fails, click <strong>Refresh Pairing QR</strong> below for a fresh 30-second token.

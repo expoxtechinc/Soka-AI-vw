@@ -39,19 +39,20 @@ service cloud.firestore {
     // --- Validation Helpers ---
     function isValidUser(data, userId) {
       return data.keys().hasAll(['id', 'name', 'email', 'role', 'createdAt']) &&
-             data.keys().size() <= 6 &&
+             data.keys().size() <= 7 &&
              data.id == userId &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              data.email is string && data.email.size() > 0 && data.email.size() <= 150 &&
              data.role is string && (data.role == 'user' || data.role == 'admin') &&
              data.createdAt is string && data.createdAt.size() <= 50 &&
+             (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 1000)) &&
              // Prevent non-admins from self-assigning admin role
              (data.role != 'admin' || isAdmin());
     }
 
     function isValidMessage(data, userId) {
       return data.keys().hasAll(['id', 'userId', 'role', 'content', 'timestamp']) &&
-             data.keys().size() <= 7 &&
+             data.keys().size() <= 8 &&
              data.id is string && data.id.size() <= 128 &&
              data.userId == userId &&
              data.role is string && (data.role == 'user' || data.role == 'assistant') &&
@@ -78,7 +79,8 @@ service cloud.firestore {
 
       // --- Nested User Chat Messages Subcollection ---
       match /messages/{messageId} {
-        allow get, list: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
+        allow get: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
+        allow list: if isValidId(userId) && (isOwner(userId) || isAdmin());
         allow create: if isValidId(userId) && isValidId(messageId) && isOwner(userId) && isValidMessage(incoming(), userId);
         allow update: if isValidId(userId) && isValidId(messageId) && isOwner(userId) && isValidMessage(incoming(), userId) && incoming().id == existing().id;
         allow delete: if isValidId(userId) && isValidId(messageId) && (isOwner(userId) || isAdmin());
