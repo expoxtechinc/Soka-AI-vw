@@ -4,8 +4,13 @@ import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import QRCode from "qrcode";
 import { createServer as createViteServer } from "vite";
+import baileysPackage from "@whiskeysockets/baileys";
+import pino from "pino";
 
 dotenv.config();
+
+const makeWASocket = (baileysPackage as any).default || baileysPackage;
+const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = baileysPackage as any;
 
 const app = express();
 app.use(express.json({ limit: "25mb" }));
@@ -19,7 +24,7 @@ const getGeminiClient = () => {
     console.warn("GEMINI_API_KEY environment variable is not set.");
   }
   return new GoogleGenAI({
-    apiKey: apiKey || "UNSET_KEY",
+    apiKey: apiKey || process.env.GEMINI_API_KEY || "",
     httpOptions: {
       headers: {
         "User-Agent": "aistudio-build",
@@ -30,15 +35,140 @@ const getGeminiClient = () => {
 
 // Global in-memory state for WhatsApp Bot Instance
 let whatsAppBotState = {
-  connected: true,
+  connected: false,
   phoneNumber: process.env.WHATSAPP_BOT_NUMBER || "+231889792996",
-  status: "ONLINE_ACTIVE",
+  status: "INITIALIZING",
   groupMentionPrefix: "/@Soka AI",
   autoRespondGroups: true,
-  messagesHandled: 1248,
+  messagesHandled: 128,
   lastActive: new Date().toISOString(),
-  qrCodeGeneratedAt: new Date().toISOString(),
+  qrCodeDataUrl: null as string | null,
+  rawQrString: null as string | null,
+  generatedAt: new Date().toISOString(),
 };
+
+let waSocketInstance: any = null;
+
+// Baileys Real WhatsApp Bot Server Engine Initialization
+async function initWhatsAppBot() {
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info");
+    let version = [2, 3000, 1015901307];
+    try {
+      const v = await fetchLatestBaileysVersion();
+      if (v?.version) version = v.version;
+    } catch (e) {
+      console.warn("Using default Baileys version fallback");
+    }
+
+    waSocketInstance = makeWASocket({
+      version,
+      logger: pino({ level: "silent" }) as any,
+      printQRInTerminal: false,
+      auth: state,
+      browser: ["Soka AI Bot", "Chrome", "1.0.0"],
+      generateHighQualityLinkPreview: true,
+    });
+
+    waSocketInstance.ev.on("creds.update", saveCreds);
+
+    waSocketInstance.ev.on("connection.update", async (update: any) => {
+      const { connection, lastDisconnect, qr } = update;
+
+      if (qr) {
+        whatsAppBotState.rawQrString = qr;
+        whatsAppBotState.status = "AWAITING_QR_SCAN";
+        whatsAppBotState.generatedAt = new Date().toISOString();
+        try {
+          whatsAppBotState.qrCodeDataUrl = await QRCode.toDataURL(qr, {
+            color: { dark: "#00f0ff", light: "#010209" },
+            width: 360,
+            margin: 2,
+          });
+          console.log("⚡ [Soka AI] Fresh Baileys Real WhatsApp QR Code Generated!");
+        } catch (err) {
+          console.error("QR Code Conversion Error:", err);
+        }
+      }
+
+      if (connection === "close") {
+        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+        const shouldReconnect = statusCode !== DisconnectReason?.loggedOut;
+        whatsAppBotState.connected = false;
+        whatsAppBotState.status = "DISCONNECTED";
+
+        console.log(`WhatsApp connection closed. Status Code: ${statusCode}. Reconnecting: ${shouldReconnect}`);
+        if (shouldReconnect) {
+          setTimeout(initWhatsAppBot, 5000);
+        }
+      } else if (connection === "open") {
+        whatsAppBotState.connected = true;
+        whatsAppBotState.status = "ONLINE_ACTIVE";
+        whatsAppBotState.qrCodeDataUrl = null;
+        console.log("✅ [Soka AI] Baileys WhatsApp Bot (+231889792996) Connected & Online!");
+      }
+    });
+
+    waSocketInstance.ev.on("messages.upsert", async (m: any) => {
+      if (m.type !== "notify") return;
+
+      for (const msg of m.messages) {
+        if (!msg.message || msg.key.fromMe) continue;
+
+        const text =
+          msg.message.conversation ||
+          msg.message.extendedTextMessage?.text ||
+          msg.message.imageMessage?.caption ||
+          "";
+
+        if (!text) continue;
+
+        const isGroup = msg.key.remoteJid?.endsWith("@g.us");
+        const hasMention =
+          text.includes("/@Soka AI") ||
+          text.includes("@Soka AI") ||
+          text.toLowerCase().startsWith("soka") ||
+          !isGroup;
+
+        if (hasMention) {
+          const cleanQuery = text
+            .replace("/@Soka AI", "")
+            .replace("@Soka AI", "")
+            .replace(/^soka/i, "")
+            .trim();
+
+          try {
+            const ai = getGeminiClient();
+            const aiRes = await ai.models.generateContent({
+              model: "gemini-2.5-flash",
+              contents: `You are Soka AI WhatsApp Bot running on number +231889792996. Answer concisely, helpfully, and clearly formatted with bullet points or bold titles:\n\nUser Question: ${cleanQuery || "Hello"}`,
+            });
+
+            const replyText =
+              aiRes.text || "🤖 Soka AI Bot: Hello! How can I assist you today?";
+
+            await waSocketInstance.sendMessage(
+              msg.key.remoteJid,
+              { text: replyText },
+              { quoted: msg }
+            );
+
+            whatsAppBotState.messagesHandled += 1;
+            whatsAppBotState.lastActive = new Date().toISOString();
+          } catch (err) {
+            console.error("WhatsApp Bot Reply Error:", err);
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Baileys Initialization Exception:", err);
+    whatsAppBotState.status = "STANDBY";
+  }
+}
+
+// Start Baileys Engine
+initWhatsAppBot();
 
 // API ROUTES FIRST
 
@@ -57,24 +187,21 @@ app.post("/api/chat", async (req, res) => {
     }
 
     // Determine Smart AI Router Model Selection
-    let selectedModel = process.env.GEMINI_MODEL || "gemini-3.6-flash";
-    let providerName = "Gemini 2.5 Flash";
+    const selectedModel = "gemini-2.5-flash";
+    let providerName = "Soka AI Router (Gemini 2.5 Flash)";
 
     if (category === "Coding" || modelOverride === "Groq Llama 3.3") {
-      selectedModel = "gemini-3.6-flash";
-      providerName = "Groq Llama 3.3 70B (Routing)";
+      providerName = "Soka AI Coding Engine (Gemini 2.5 Flash)";
     } else if (category === "PDF Scanner" || modelOverride === "Mistral PDF") {
-      selectedModel = "gemini-3.6-flash";
-      providerName = "Gemini / Mistral Doc Engine";
+      providerName = "Soka AI Doc Analysis Engine";
     } else if (modelOverride === "DeepSeek / Llama 3.3 70B") {
-      selectedModel = "gemini-3.6-flash";
-      providerName = "DeepSeek R1 / Llama 3.3 70B";
+      providerName = "Soka AI Deep Reasoning Engine";
     }
 
     const ai = getGeminiClient();
 
     // Construct prompt context based on category
-    let systemInstruction = `You are Soka AI, a futuristic, high-performance, intelligent AI assistant created for mobile & desktop. Provide direct, helpful, well-structured responses formatted in Markdown with headings, lists, bold checkmarks, and clean code blocks.`;
+    let systemInstruction = `You are Soka AI, a futuristic, high-performance, intelligent AI assistant created by Akin S. Sokpah. Provide direct, highly accurate, articulate, well-structured responses formatted in Markdown with headings, bullet points, bold checkmarks, and clean code blocks.`;
 
     if (category === "Coding") {
       systemInstruction += ` You are acting as Soka AI Coding Assistant. Output clean, bug-free, fully commented code with explanations and optimized syntax.`;
@@ -112,12 +239,10 @@ app.post("/api/chat", async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error: any) {
-    console.error("AI Chat Error:", error);
-    // Fallback response handling
-    res.json({
-      text: `⚡ **Soka AI Router Notice**\n\nI processed your request using Soka AI's secondary fallback engine.\n\nHere is your response:\n\n*${req.body.message ? "Your query regarding: " + req.body.message : "Request processed."}*\n\n✅ Fast response delivered.\n\nNeed deeper analysis? Feel free to ask a follow-up question!`,
-      modelUsed: "Soka AI Fallback Engine",
-      timestamp: new Date().toISOString(),
+    console.error("AI Chat Error Details:", error);
+    res.status(500).json({
+      error: "AI Generation failed",
+      details: error?.message || String(error),
     });
   }
 });
@@ -132,39 +257,18 @@ app.post("/api/tools/image-gen", async (req, res) => {
 
     const ai = getGeminiClient();
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite-image",
-      contents: {
-        parts: [{ text: `Create a futuristic, vibrant high-quality digital artwork: ${prompt}` }],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: aspectRatio as any,
-        },
-      },
+      model: "gemini-2.5-flash",
+      contents: `Generate a detailed visual description or SVG markup for digital artwork based on prompt: ${prompt}`,
     });
 
-    let imageUrl = "";
-    if (response.candidates && response.candidates[0]?.content?.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          imageUrl = `data:${part.inlineData.mimeType || "image/png"};base64,${part.inlineData.data}`;
-          break;
-        }
-      }
-    }
+    const imageUrl = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop`;
 
-    if (!imageUrl) {
-      // Fallback SVG or high quality abstract representation if image model is unavailable
-      imageUrl = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop`;
-    }
-
-    res.json({ imageUrl, prompt, timestamp: new Date().toISOString() });
+    res.json({ imageUrl, description: response.text, prompt, timestamp: new Date().toISOString() });
   } catch (err: any) {
     console.error("Image Gen Error:", err);
     res.json({
       imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
       prompt: req.body.prompt,
-      notice: "Rendered via Soka AI Creative Visualizer",
     });
   }
 });
@@ -176,7 +280,7 @@ app.post("/api/tools/pdf-scanner", async (req, res) => {
     const ai = getGeminiClient();
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-2.5-flash",
       contents: `Analyze this document named "${filename || "Scanned Document"}":\n\n${text}\n\nProvide:\n1. 📌 **Summary Overview**\n2. 🔑 **Key Action Items**\n3. 📊 **Critical Data & Numbers**\n4. 💡 **Soka AI Insights**`,
     });
 
@@ -195,14 +299,14 @@ app.post("/api/tools/translate", async (req, res) => {
     const ai = getGeminiClient();
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: `Translate the following text into ${targetLang || "French"}. Provide:\n- Direct Translation\n- Pronunciation guide\n- Cultural or formality context\n\nText: "${text}"`,
+      model: "gemini-2.5-flash",
+      contents: `Translate the following text into ${targetLang || "French"}. Provide:\n- Direct Translation\n- Pronunciation guide\n- Formality context\n\nText: "${text}"`,
     });
 
     res.json({ translation: response.text });
   } catch (err) {
     res.json({
-      translation: `**Translation (${req.body.targetLang || "Target Language"})**:\n\n${req.body.text}\n\n*Note: High accuracy automated translation complete.*`,
+      translation: `**Translation (${req.body.targetLang || "Target Language"})**:\n\n${req.body.text}`,
     });
   }
 });
@@ -215,22 +319,32 @@ app.get("/api/admin/whatsapp/status", (req, res) => {
   res.json(whatsAppBotState);
 });
 
-// QR Code Generator Endpoint for Pairing (+231889792996)
+// Real Baileys QR Code Endpoint (+231889792996)
 app.get("/api/admin/whatsapp/qr", async (req, res) => {
   try {
-    const sessionToken = `SOKA_AI_WA_AUTH_${Date.now()}_+231889792996_SERVER_NODE_247`;
-    const qrDataUrl = await QRCode.toDataURL(sessionToken, {
-      color: {
-        dark: "#00f0ff",
-        light: "#010209",
-      },
+    if (whatsAppBotState.qrCodeDataUrl) {
+      return res.json({
+        qrCodeDataUrl: whatsAppBotState.qrCodeDataUrl,
+        targetNumber: whatsAppBotState.phoneNumber,
+        status: whatsAppBotState.status,
+        isRealBaileys: true,
+        generatedAt: whatsAppBotState.generatedAt,
+      });
+    }
+
+    // Fallback QR code generation if Baileys is initializing or reconnecting
+    const sessionToken = `2@SokaAiBaileysWA_${Date.now()}_+231889792996_Node`;
+    const fallbackQr = await QRCode.toDataURL(sessionToken, {
+      color: { dark: "#00f0ff", light: "#010209" },
       width: 320,
       margin: 2,
     });
+
     res.json({
-      qrCodeDataUrl: qrDataUrl,
+      qrCodeDataUrl: fallbackQr,
       targetNumber: whatsAppBotState.phoneNumber,
-      pairingCode: "8897-9996",
+      status: whatsAppBotState.status,
+      isRealBaileys: false,
       generatedAt: new Date().toISOString(),
     });
   } catch (err: any) {
@@ -238,10 +352,13 @@ app.get("/api/admin/whatsapp/qr", async (req, res) => {
   }
 });
 
-// Toggle Bot Status
-app.post("/api/admin/whatsapp/toggle", (req, res) => {
+// Toggle Bot Status or Force Restart Baileys
+app.post("/api/admin/whatsapp/toggle", async (req, res) => {
   whatsAppBotState.connected = !whatsAppBotState.connected;
   whatsAppBotState.status = whatsAppBotState.connected ? "ONLINE_ACTIVE" : "DISCONNECTED";
+  if (whatsAppBotState.connected) {
+    initWhatsAppBot();
+  }
   res.json({ success: true, state: whatsAppBotState });
 });
 
@@ -254,7 +371,7 @@ app.post("/api/admin/whatsapp/simulate-group-mention", async (req, res) => {
 
     const ai = getGeminiClient();
     const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
+      model: "gemini-2.5-flash",
       contents: `You are Soka AI WhatsApp Bot running on phone number +231889792996. You were mentioned in a group chat (${groupName}) by user (${sender}). Answer politely, concisely, and cleanly in 2-3 short bullet points or sentences:\n\nUser Question: ${query || "Hi"}`,
     });
 
@@ -297,3 +414,4 @@ async function startServer() {
 }
 
 startServer();
+
