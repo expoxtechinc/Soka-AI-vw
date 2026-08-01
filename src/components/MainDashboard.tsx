@@ -188,7 +188,7 @@ export const MainDashboard: React.FC<MainDashboardProps> = ({
               WhatsApp 24/7 AI Bot Connection
             </h4>
             <p className="text-[11px] text-slate-400">
-              Bot Number: <span className="text-cyan-300 font-mono">+231889792996</span> — Responds to group mentions <code className="text-slate-300">/@Soka AI</code>
+              Bot Number: <span className="text-cyan-300 font-mono">+231 88 988 3943</span> — Responds to group mentions <code className="text-slate-300">/@Soka AI</code>
             </p>
           </div>
         </div>

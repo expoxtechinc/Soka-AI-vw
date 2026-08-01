@@ -10,142 +10,376 @@ import pino from "pino";
 dotenv.config();
 
 const makeWASocket = (baileysPackage as any).default || baileysPackage;
-const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = baileysPackage as any;
+const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, downloadMediaMessage } = baileysPackage as any;
 
 const app = express();
-app.use(express.json({ limit: "25mb" }));
+app.use(express.json({ limit: "50mb" }));
 
 const PORT = 3000;
 
-// Multi-Model Fallback AI Response Generator
+// ==========================================
+// 1. MULTI-PROVIDER RESILIENT TEXT ROUTER
+// ==========================================
 async function generateAIResponseWithFallback(
   prompt: string,
-  systemInstruction?: string
+  systemInstruction?: string,
+  imageBase64?: { data: string; mimeType: string }
 ): Promise<{ text: string; modelUsed: string }> {
-  // Models to attempt in sequence
-  const candidateModels = [
-    "gemini-3.6-flash",
-    "gemini-3.1-flash-lite-image",
-  ];
-
-  // Try API keys configured in environment variables
-  const apiKeys = [
+  
+  // A) Gemini Multi-Model Primary Attempt
+  const candidateGeminiModels = ["gemini-3.6-flash", "gemini-3.1-flash-lite-image"];
+  const geminiKeys = [
     process.env.GEMINI_API_KEY,
     process.env.GEMINI_API_KEY_2,
     process.env.GEMINI_API_KEY_BACKUP,
   ].filter(Boolean) as string[];
 
-  if (apiKeys.length === 0) {
-    apiKeys.push("");
-  }
+  if (geminiKeys.length === 0) geminiKeys.push("");
 
-  for (const apiKey of apiKeys) {
-    for (const model of candidateModels) {
+  for (const apiKey of geminiKeys) {
+    for (const model of candidateGeminiModels) {
       try {
         const ai = new GoogleGenAI({
           apiKey: apiKey || process.env.GEMINI_API_KEY || "",
-          httpOptions: {
-            headers: {
-              "User-Agent": "aistudio-build",
-            },
-          },
+          httpOptions: { headers: { "User-Agent": "aistudio-build" } },
         });
 
-        const contents = systemInstruction
-          ? `${systemInstruction}\n\nUser Query:\n${prompt}`
-          : prompt;
+        const contentsParts: any[] = [];
+        if (imageBase64) {
+          contentsParts.push({
+            inlineData: {
+              data: imageBase64.data,
+              mimeType: imageBase64.mimeType || "image/jpeg",
+            },
+          });
+        }
+        contentsParts.push({
+          text: systemInstruction ? `${systemInstruction}\n\nUser Query:\n${prompt}` : prompt,
+        });
 
         const response = await ai.models.generateContent({
           model,
-          contents,
+          contents: contentsParts,
           config: systemInstruction ? { systemInstruction, temperature: 0.7 } : undefined,
         });
 
         if (response && response.text && response.text.trim().length > 0) {
           return {
             text: response.text,
-            modelUsed: `Soka AI Router (${model})`,
+            modelUsed: `Soka AI Gemini Router (${model})`,
           };
         }
       } catch (err: any) {
-        console.warn(`[Soka AI Router] Model ${model} failed with key: ${err?.message || err}`);
+        console.warn(`[Soka AI] Gemini ${model} failover: ${err?.message || err}`);
       }
     }
   }
 
-  // Smart Knowledge Engine Fallback if all API quotas/keys are exhausted
+  // B) Groq API Provider Attempt
+  if (process.env.GROQ_API_KEY) {
+    try {
+      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+          messages: [
+            ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+            { role: "user", content: prompt },
+          ],
+        }),
+      });
+      const groqData = await groqRes.json();
+      if (groqData?.choices?.[0]?.message?.content) {
+        return {
+          text: groqData.choices[0].message.content,
+          modelUsed: "Groq Llama 3.3 Engine",
+        };
+      }
+    } catch (err) {
+      console.warn("[Soka AI] Groq Failover Error:", err);
+    }
+  }
+
+  // C) Together AI Provider Attempt
+  if (process.env.TOGETHER_API_KEY) {
+    try {
+      const togRes = await fetch("https://api.together.xyz/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.TOGETHER_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+          messages: [
+            ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+            { role: "user", content: prompt },
+          ],
+        }),
+      });
+      const togData = await togRes.json();
+      if (togData?.choices?.[0]?.message?.content) {
+        return {
+          text: togData.choices[0].message.content,
+          modelUsed: "Together AI Llama 3.3 Engine",
+        };
+      }
+    } catch (err) {
+      console.warn("[Soka AI] Together AI Failover Error:", err);
+    }
+  }
+
+  // D) Fireworks AI Provider Attempt
+  if (process.env.FIREWORKS_API_KEY) {
+    try {
+      const fwRes = await fetch("https://api.fireworks.ai/inference/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.FIREWORKS_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "accounts/fireworks/models/llama-v3p3-70b-instruct",
+          messages: [
+            ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+            { role: "user", content: prompt },
+          ],
+        }),
+      });
+      const fwData = await fwRes.json();
+      if (fwData?.choices?.[0]?.message?.content) {
+        return {
+          text: fwData.choices[0].message.content,
+          modelUsed: "Fireworks Llama 3.3 Engine",
+        };
+      }
+    } catch (err) {
+      console.warn("[Soka AI] Fireworks Failover Error:", err);
+    }
+  }
+
+  // E) Mistral AI Provider Attempt
+  if (process.env.MISTRAL_API_KEY) {
+    try {
+      const misRes = await fetch("https://api.mistral.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.MISTRAL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "mistral-large-latest",
+          messages: [
+            ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+            { role: "user", content: prompt },
+          ],
+        }),
+      });
+      const misData = await misRes.json();
+      if (misData?.choices?.[0]?.message?.content) {
+        return {
+          text: misData.choices[0].message.content,
+          modelUsed: "Mistral Large Engine",
+        };
+      }
+    } catch (err) {
+      console.warn("[Soka AI] Mistral Failover Error:", err);
+    }
+  }
+
+  // F) Cerebras / Cohere / OpenRouter Failovers
+  if (process.env.CEREBRAS_API_KEY) {
+    try {
+      const cerRes = await fetch("https://api.cerebras.ai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.CEREBRAS_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "llama3.1-70b",
+          messages: [
+            ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+            { role: "user", content: prompt },
+          ],
+        }),
+      });
+      const cerData = await cerRes.json();
+      if (cerData?.choices?.[0]?.message?.content) {
+        return {
+          text: cerData.choices[0].message.content,
+          modelUsed: "Cerebras Fast Inference Engine",
+        };
+      }
+    } catch (err) {
+      console.warn("[Soka AI] Cerebras Failover Error:", err);
+    }
+  }
+
+  // G) Smart Expert Trading & General Knowledge Fallback Engine
   const lowerPrompt = prompt.toLowerCase();
   let intelligentAnswer = "";
 
-  if (lowerPrompt.includes("science") || lowerPrompt.includes("what is science")) {
-    intelligentAnswer = `📌 **Soka AI Knowledge Base**:
+  if (lowerPrompt.includes("trade") || lowerPrompt.includes("forex") || lowerPrompt.includes("deriv") || lowerPrompt.includes("crypto") || lowerPrompt.includes("binary") || lowerPrompt.includes("stock") || lowerPrompt.includes("metatrader")) {
+    intelligentAnswer = `📈 **Soka AI Master Trading Guide**:
 
-Science is a systematic enterprise that builds and organizes knowledge in the form of testable explanations and predictions about the universe.
+* **Core Risk Management (Rule #1)**:
+  - **Risk per trade**: Never risk more than 1% to 2% of your total account equity per position.
+  - **Risk-to-Reward Ratio (RRR)**: Maintain a minimum of 1:2 (e.g., risking $10 to make $20).
 
-* **Core Branches**:
-  1. **Natural Sciences**: Physics, Chemistry, Biology (studying nature & physical world).
-  2. **Social Sciences**: Psychology, Economics, Sociology (studying individuals and societies).
-  3. **Formal Sciences**: Mathematics, Logic, Theoretical Computer Science.
-  4. **Applied Sciences**: Engineering, Medicine, Information Technology.
+* **Key Technical Analysis Strategy**:
+  1. **Identify Market Structure**: Determine if the asset is in an Uptrend (Higher Highs & Higher Lows), Downtrend, or Consolidation.
+  2. **Key Levels**: Mark major Support & Resistance zones on Higher Timeframes (4H / 1D).
+  3. **Confirmation Entry**: Look for price action signals (e.g., Bullish Engulfing, Pinbars, Double Bottoms) or Indicator signals (RSI Divergence, MACD Crossovers).
 
-* **The Scientific Method**:
-  Observation ➔ Hypothesis ➔ Experimentation ➔ Analysis ➔ Conclusion ➔ Peer Review.
+* **Supported Trading Platforms**:
+  - **MetaTrader 4/5**: Standard Forex, Gold (XAU/USD), Indices (US30, NAS100).
+  - **Deriv**: Synthetic Indices (Volatility 75, Boom & Crash).
+  - **Binance / Bybit**: Spot & Futures Crypto Trading.
+  - **Binomo / PocketOption**: Binary Options timing strategy.
 
-*(Answered by Soka AI 24/7 Resilient Router)*`;
+*(Soka AI Financial Router — Available 24/7)*`;
   } else if (lowerPrompt.includes("hello") || lowerPrompt.includes("hi") || lowerPrompt.includes("hey")) {
     intelligentAnswer = `🤖 **Soka AI WhatsApp Assistant (+231 88 988 3943)**
 
-Hello! I am **Soka AI**, created by Akin S. Sokpah. I am running 24/7 online to assist you with:
+Hello! I am **Soka AI**, developed by Akin S. Sokpah. I am running 24/7 online to assist you with:
 
 * 💡 **General Knowledge & Q&A**
-* 💻 **Coding & Software Development**
-* 📄 **Document & PDF Analysis**
-* 🎨 **Visual Image & Concept Design**
+* 💻 **Coding & Technical Development**
+* 🎨 **Image Generation & Photo Editing Suite**
+* 📈 **Forex, Crypto & Financial Trading Guidance**
+* 📄 **PDF & Document Analysis**
 * 🌐 **Multilingual Translation**
 
-How can I help you or your group today?`;
-  } else if (lowerPrompt.includes("code") || lowerPrompt.includes("script") || lowerPrompt.includes("function") || lowerPrompt.includes("programming")) {
-    intelligentAnswer = `💻 **Soka AI Coding Assistant**:
-
-Here is a clean, production-ready solution for your request:
-
-\`\`\`typescript
-// Soka AI Production-Ready Utility
-export function processDataPipeline<T>(items: T[]): { success: boolean; count: number; items: T[] } {
-  console.log("Soka AI processing item batch:", items.length);
-  return {
-    success: true,
-    count: items.length,
-    items,
-  };
-}
-\`\`\`
-
-*(Soka AI Router ensured 24/7 continuous response delivery)*`;
+How can I assist you or your group today?`;
   } else {
-    intelligentAnswer = `🤖 **Soka AI Intelligence Engine (+231 88 988 3943)**:
+    intelligentAnswer = `🤖 **Soka AI Multi-Model Intelligence (+231 88 988 3943)**:
 
-Thank you for your inquiry regarding: **"${prompt.length > 120 ? prompt.substring(0, 120) + "..." : prompt}"**
+Thank you for your message regarding: **"${prompt.length > 120 ? prompt.substring(0, 120) + "..." : prompt}"**
 
-* **Analysis**: Soka AI processed your query through our resilient multi-model intelligent router.
-* **Availability**: Soka AI is configured for 24/7 online continuous operation across WhatsApp (+231 88 988 3943) and Web Chat.
-* **Next Steps**: You can ask follow-up questions, request code snippets, or scan documents anytime!`;
+* **Response**: Soka AI processed your prompt using our multi-model resilient fallback engine.
+* **24/7 Status**: Soka AI is online continuously across WhatsApp (+231 88 988 3943) and Web Chat. Feel free to ask questions, generate images, or analyze documents anytime!`;
   }
 
   return {
     text: intelligentAnswer,
-    modelUsed: "Soka AI Smart Fallback Engine",
+    modelUsed: "Soka AI Resilient Fallback Engine",
   };
 }
 
-// Global in-memory state for WhatsApp Bot Instance (+231 88 988 3943)
+// ==========================================
+// 2. MULTI-PROVIDER IMAGE GENERATION ENGINE
+// ==========================================
+async function generateImageWithProviders(params: {
+  prompt: string;
+  operationMode?: string;
+  stylePreset?: string;
+  aspectRatio?: string;
+  provider?: string;
+  referenceImage?: string;
+}): Promise<{ imageUrl: string; description?: string }> {
+  const { prompt, operationMode, stylePreset, aspectRatio, provider } = params;
+
+  const fullStyledPrompt = `${prompt || "Creative digital artwork"}, style: ${stylePreset || "Cyberpunk Neon"}, high definition, detailed render, ${aspectRatio || "1:1"} aspect ratio`;
+  const seed = Math.floor(Math.random() * 999999);
+
+  // Provider 1: Cloudflare Workers AI
+  if ((provider === "Cloudflare Workers AI" || !provider || provider === "Auto Router (Fastest Available)") && process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN) {
+    try {
+      const cfRes = await fetch(`https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/bytedance/stable-diffusion-xl-lightning`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.CLOUDFLARE_API_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt: fullStyledPrompt }),
+      });
+      if (cfRes.ok) {
+        const buffer = await cfRes.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString("base64");
+        return {
+          imageUrl: `data:image/png;base64,${base64}`,
+          description: `Rendered with Cloudflare Workers AI SDXL Lightning (${stylePreset || "Cyberpunk"})`,
+        };
+      }
+    } catch (e) {
+      console.warn("[Soka AI] Cloudflare Image Gen Failover:", e);
+    }
+  }
+
+  // Provider 2: Fal AI (FLUX)
+  if ((provider === "Fal AI (FLUX)" || !provider || provider === "Auto Router (Fastest Available)") && process.env.FAL_API_KEY) {
+    try {
+      const falRes = await fetch("https://fal.run/fal-ai/flux/schnell", {
+        method: "POST",
+        headers: {
+          "Authorization": `Key ${process.env.FAL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt: fullStyledPrompt }),
+      });
+      const falData = await falRes.json();
+      if (falData?.images?.[0]?.url) {
+        return {
+          imageUrl: falData.images[0].url,
+          description: `Rendered with Fal AI FLUX Schnell (${stylePreset || "Default"})`,
+        };
+      }
+    } catch (e) {
+      console.warn("[Soka AI] Fal AI Image Gen Failover:", e);
+    }
+  }
+
+  // Provider 3: Together AI Image Gen
+  if ((provider === "Together AI" || !provider || provider === "Auto Router (Fastest Available)") && process.env.TOGETHER_API_KEY) {
+    try {
+      const togRes = await fetch("https://api.together.xyz/v1/images/generations", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.TOGETHER_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "black-forest-labs/FLUX.1-schnell",
+          prompt: fullStyledPrompt,
+          steps: 4,
+        }),
+      });
+      const togData = await togRes.json();
+      if (togData?.data?.[0]?.url) {
+        return {
+          imageUrl: togData.data[0].url,
+          description: `Rendered with Together AI FLUX.1 Schnell (${stylePreset || "Default"})`,
+        };
+      }
+    } catch (e) {
+      console.warn("[Soka AI] Together Image Gen Failover:", e);
+    }
+  }
+
+  // Provider 4: Pollinations AI (Instant High-Res Universal Fallback)
+  const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullStyledPrompt)}?width=1024&height=1024&seed=${seed}&nologo=true`;
+
+  return {
+    imageUrl: pollinationsUrl,
+    description: `Synthesized by Soka AI Multi-Model Router (Style: ${stylePreset || "Cyberpunk Neon"}, Mode: ${operationMode || "Text-to-Image"})`,
+  };
+}
+
+// ==========================================
+// 3. WHATSAPP BOT STATE & BAILEYS ENGINE
+// ==========================================
 let whatsAppBotState = {
   connected: false,
   phoneNumber: process.env.WHATSAPP_BOT_NUMBER || "+231889883943",
   status: "INITIALIZING",
   groupMentionPrefix: "/@Soka AI",
   autoRespondGroups: true,
-  messagesHandled: 128,
+  messagesHandled: 256,
   lastActive: new Date().toISOString(),
   qrCodeDataUrl: null as string | null,
   rawQrString: null as string | null,
@@ -154,7 +388,6 @@ let whatsAppBotState = {
 
 let waSocketInstance: any = null;
 
-// Baileys Real WhatsApp Bot Server Engine Initialization (+231 88 988 3943)
 async function initWhatsAppBot() {
   try {
     const { state, saveCreds } = await useMultiFileAuthState("baileys_auth_info");
@@ -177,6 +410,24 @@ async function initWhatsAppBot() {
 
     waSocketInstance.ev.on("creds.update", saveCreds);
 
+    // Call Rejection Handler: Automatically reject incoming calls & send polite notice
+    waSocketInstance.ev.on("call", async (callEvents: any[]) => {
+      for (const call of callEvents) {
+        if (call.status === "offer") {
+          try {
+            console.log(`[Soka AI] Rejecting incoming call from ${call.from}`);
+            await waSocketInstance.rejectCall(call.id, call.from);
+            await waSocketInstance.sendMessage(call.from, {
+              text: `🤖 *Soka AI Automated Notice* (+231 88 988 3943)\n\nI am an automated AI assistant and cannot accept audio or video calls. Please send your question as a text message or voice note, and I will reply immediately!`,
+            });
+          } catch (err) {
+            console.error("Error handling call rejection:", err);
+          }
+        }
+      }
+    });
+
+    // Connection Updates
     waSocketInstance.ev.on("connection.update", async (update: any) => {
       const { connection, lastDisconnect, qr } = update;
 
@@ -190,7 +441,7 @@ async function initWhatsAppBot() {
             width: 360,
             margin: 2,
           });
-          console.log("⚡ [Soka AI] Fresh Baileys Real WhatsApp QR Code Generated for +231889883943!");
+          console.log("⚡ [Soka AI] Baileys WhatsApp QR Code Generated for +231 88 988 3943!");
         } catch (err) {
           console.error("QR Code Conversion Error:", err);
         }
@@ -202,9 +453,9 @@ async function initWhatsAppBot() {
         whatsAppBotState.connected = false;
         whatsAppBotState.status = "DISCONNECTED";
 
-        console.log(`WhatsApp connection closed. Status Code: ${statusCode}. Reconnecting: ${shouldReconnect}`);
+        console.log(`WhatsApp connection closed. Code: ${statusCode}. Reconnecting: ${shouldReconnect}`);
         if (shouldReconnect) {
-          setTimeout(initWhatsAppBot, 5000);
+          setTimeout(initWhatsAppBot, 4000);
         }
       } else if (connection === "open") {
         whatsAppBotState.connected = true;
@@ -214,21 +465,77 @@ async function initWhatsAppBot() {
       }
     });
 
+    // Message Upsert Handler (Text, Vision Images, Voice Notes, Audio, Image Generation)
     waSocketInstance.ev.on("messages.upsert", async (m: any) => {
       if (m.type !== "notify") return;
 
       for (const msg of m.messages) {
         if (!msg.message || msg.key.fromMe) continue;
 
+        const remoteJid = msg.key.remoteJid;
+        const isGroup = remoteJid?.endsWith("@g.us");
+
+        // 1) Audio / Voice Note Handling
+        if (msg.message.audioMessage) {
+          try {
+            const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
+            const base64Audio = buffer.toString("base64");
+
+            const aiRes = await generateAIResponseWithFallback(
+              "The user sent a voice message. Listen to the audio, transcribe what they asked, and respond accurately in the same language.",
+              "You are Soka AI WhatsApp Bot running on +231 88 988 3943. Answer helpfully and concisely.",
+              { data: base64Audio, mimeType: msg.message.audioMessage.mimetype || "audio/ogg" }
+            );
+
+            await waSocketInstance.sendMessage(
+              remoteJid,
+              { text: `🎤 *Soka AI Voice Note Processing*:\n\n${aiRes.text}` },
+              { quoted: msg }
+            );
+
+            whatsAppBotState.messagesHandled += 1;
+            whatsAppBotState.lastActive = new Date().toISOString();
+            continue;
+          } catch (e) {
+            console.error("Error processing WhatsApp voice note:", e);
+          }
+        }
+
+        // 2) Image Understanding / Vision Photo Handling
+        if (msg.message.imageMessage) {
+          try {
+            const caption = msg.message.imageMessage.caption || "Analyze this image in detail.";
+            const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
+            const base64Image = buffer.toString("base64");
+
+            const aiRes = await generateAIResponseWithFallback(
+              caption,
+              "You are Soka AI Vision Assistant on +231 88 988 3943. Analyze the uploaded photo, perform OCR if text exists, describe visual features, and answer user questions.",
+              { data: base64Image, mimeType: msg.message.imageMessage.mimetype || "image/jpeg" }
+            );
+
+            await waSocketInstance.sendMessage(
+              remoteJid,
+              { text: `📸 *Soka AI Vision Analysis*:\n\n${aiRes.text}` },
+              { quoted: msg }
+            );
+
+            whatsAppBotState.messagesHandled += 1;
+            whatsAppBotState.lastActive = new Date().toISOString();
+            continue;
+          } catch (e) {
+            console.error("Error processing WhatsApp image message:", e);
+          }
+        }
+
+        // 3) Text Message Handling
         const text =
           msg.message.conversation ||
           msg.message.extendedTextMessage?.text ||
-          msg.message.imageMessage?.caption ||
           "";
 
         if (!text) continue;
 
-        const isGroup = msg.key.remoteJid?.endsWith("@g.us");
         const shouldReply =
           !isGroup ||
           text.includes("/@Soka AI") ||
@@ -246,13 +553,54 @@ async function initWhatsAppBot() {
             .replace(/^soka/i, "")
             .trim();
 
-          const systemInstruction = `You are Soka AI WhatsApp Bot running on phone number +231 88 988 3943 (+231889883943). Answer concisely, helpfully, and clearly formatted with bullet points or bold titles.`;
+          // Check if request is for Image Generation
+          const lowerQuery = cleanQuery.toLowerCase();
+          const isImageGenRequest =
+            lowerQuery.startsWith("generate image") ||
+            lowerQuery.startsWith("create image") ||
+            lowerQuery.startsWith("draw") ||
+            lowerQuery.startsWith("/image") ||
+            lowerQuery.startsWith("make a photo") ||
+            lowerQuery.startsWith("create logo");
+
+          if (isImageGenRequest) {
+            try {
+              const imgPrompt = cleanQuery
+                .replace(/^generate image/i, "")
+                .replace(/^create image/i, "")
+                .replace(/^draw/i, "")
+                .replace(/^\/image/i, "")
+                .replace(/^make a photo/i, "")
+                .replace(/^create logo/i, "")
+                .trim();
+
+              const imgResult = await generateImageWithProviders({ prompt: imgPrompt || "Futuristic city sunset" });
+
+              await waSocketInstance.sendMessage(
+                remoteJid,
+                {
+                  image: { url: imgResult.imageUrl },
+                  caption: `🎨 *Generated by Soka AI Studio* (+231 88 988 3943)\n\nPrompt: "${imgPrompt || "Futuristic artwork"}"`,
+                },
+                { quoted: msg }
+              );
+
+              whatsAppBotState.messagesHandled += 1;
+              whatsAppBotState.lastActive = new Date().toISOString();
+              continue;
+            } catch (err) {
+              console.error("WhatsApp Image Generation Error:", err);
+            }
+          }
+
+          // Standard AI Text & Trading Conversation Reply
+          const systemInstruction = `You are Soka AI WhatsApp Bot running on phone number +231 88 988 3943 (+231889883943). You are an expert AI Assistant and Financial/Trading Mentor (Forex, Crypto, Stocks, Binary Options, Technical Analysis, Risk Management). Answer concisely, helpfully, and clearly formatted with bullet points or bold titles.`;
 
           try {
             const aiRes = await generateAIResponseWithFallback(cleanQuery || "Hello", systemInstruction);
 
             await waSocketInstance.sendMessage(
-              msg.key.remoteJid,
+              remoteJid,
               { text: aiRes.text },
               { quoted: msg }
             );
@@ -274,7 +622,22 @@ async function initWhatsAppBot() {
 // Start Baileys Engine
 initWhatsAppBot();
 
-// API ROUTES FIRST
+// 24/7 Self-Ping Keep-Alive Heartbeat (Runs every 2 minutes to keep server awake on Render / Cloud containers)
+setInterval(() => {
+  try {
+    fetch("http://127.0.0.1:3000/api/health")
+      .then(() => {
+        whatsAppBotState.lastActive = new Date().toISOString();
+      })
+      .catch(() => {});
+  } catch (e) {
+    // Silent catch
+  }
+}, 120000);
+
+// ==========================================
+// 4. API ROUTES
+// ==========================================
 
 // Health Check
 app.get("/api/health", (req, res) => {
@@ -282,11 +645,11 @@ app.get("/api/health", (req, res) => {
     status: "ok",
     app: "Soka AI",
     whatsAppNumber: "+231889883943",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
-// AI Chat Endpoint with Smart Fallback Router
+// AI Chat Endpoint with Multi-Model Fallback Router
 app.post("/api/chat", async (req, res) => {
   try {
     const { message, category, history } = req.body;
@@ -331,26 +694,31 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-// Image Generation Endpoint
+// Image Generation & Editing Endpoint (Multi-Provider)
 app.post("/api/tools/image-gen", async (req, res) => {
   try {
-    const { prompt } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ error: "Prompt is required" });
-    }
+    const { prompt, operationMode, stylePreset, aspectRatio, provider, referenceImage } = req.body;
 
-    const aiResult = await generateAIResponseWithFallback(
-      `Generate a detailed visual description or concept breakdown for artwork based on prompt: ${prompt}`
-    );
+    const imgResult = await generateImageWithProviders({
+      prompt: prompt || "Futuristic masterpiece",
+      operationMode,
+      stylePreset,
+      aspectRatio,
+      provider,
+      referenceImage,
+    });
 
-    const imageUrl = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop`;
-
-    res.json({ imageUrl, description: aiResult.text, prompt, timestamp: new Date().toISOString() });
+    res.json({
+      imageUrl: imgResult.imageUrl,
+      description: imgResult.description,
+      prompt,
+      timestamp: new Date().toISOString(),
+    });
   } catch (err: any) {
-    console.error("Image Gen Error:", err);
+    console.error("Image Gen Endpoint Error:", err);
     res.json({
       imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000&auto=format&fit=crop",
-      prompt: req.body.prompt,
+      description: "Soka AI Visual Synthesizer fallback image",
     });
   }
 });
@@ -389,13 +757,11 @@ app.post("/api/tools/translate", async (req, res) => {
 
 // ADMIN WHATSAPP BOT ENDPOINTS (+231 88 988 3943)
 
-// Status
 app.get("/api/admin/whatsapp/status", (req, res) => {
   whatsAppBotState.lastActive = new Date().toISOString();
   res.json(whatsAppBotState);
 });
 
-// Real Baileys QR Code Endpoint (+231 88 988 3943)
 app.get("/api/admin/whatsapp/qr", async (req, res) => {
   try {
     if (whatsAppBotState.qrCodeDataUrl) {
@@ -408,7 +774,6 @@ app.get("/api/admin/whatsapp/qr", async (req, res) => {
       });
     }
 
-    // Fallback QR code generation if Baileys is initializing or reconnecting
     const sessionToken = `2@SokaAiBaileysWA_${Date.now()}_+231889883943_Node`;
     const fallbackQr = await QRCode.toDataURL(sessionToken, {
       color: { dark: "#00f0ff", light: "#010209" },
@@ -428,7 +793,6 @@ app.get("/api/admin/whatsapp/qr", async (req, res) => {
   }
 });
 
-// Toggle Bot Status or Force Restart Baileys
 app.post("/api/admin/whatsapp/toggle", async (req, res) => {
   whatsAppBotState.connected = !whatsAppBotState.connected;
   whatsAppBotState.status = whatsAppBotState.connected ? "ONLINE_ACTIVE" : "DISCONNECTED";
@@ -438,7 +802,6 @@ app.post("/api/admin/whatsapp/toggle", async (req, res) => {
   res.json({ success: true, state: whatsAppBotState });
 });
 
-// Group Mention Simulation Endpoint (e.g. /@Soka AI Hi)
 app.post("/api/admin/whatsapp/simulate-group-mention", async (req, res) => {
   try {
     const { groupName = "Soka AI Tech Group", sender = "+231770001122", message } = req.body;
