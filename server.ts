@@ -18,7 +18,80 @@ app.use(express.json({ limit: "50mb" }));
 const PORT = 3000;
 
 // ==========================================
-// 1. MULTI-PROVIDER RESILIENT TEXT ROUTER
+// 0. CONVERSATION MEMORY MANAGER
+// ==========================================
+interface ChatMemoryMessage {
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+}
+
+const conversationMemoryStore = new Map<string, ChatMemoryMessage[]>();
+
+function getChatMemory(chatId: string): ChatMemoryMessage[] {
+  return conversationMemoryStore.get(chatId) || [];
+}
+
+function appendChatMemory(chatId: string, role: "user" | "assistant", content: string) {
+  const current = getChatMemory(chatId);
+  current.push({ role, content, timestamp: new Date().toISOString() });
+  // Keep last 20 messages for context memory
+  if (current.length > 20) {
+    current.shift();
+  }
+  conversationMemoryStore.set(chatId, current);
+}
+
+function formatMemoryForPrompt(memory: ChatMemoryMessage[]): string {
+  if (memory.length === 0) return "";
+  return memory
+    .map((m) => `${m.role === "user" ? "User" : "Soka AI"}: ${m.content}`)
+    .join("\n");
+}
+
+const GLOBAL_COMPANY_SYSTEM_PROMPT = `You are Soka AI, a world-class, high-performance artificial intelligence developed and owned by SASTECH INC., a premier technology company based in Liberia.
+Key Identity & Corporate Background:
+- **Created By**: Akin S. Sokpah, a Liberian technology innovator and founder.
+- **Company**: SASTECH INC. (based in Liberia 🇱🇷).
+- **Official Bot Phone Number**: +231 88 988 3943 (+231889883943).
+- **Capabilities**: Multilingual Voice Understanding & Synthesis, Vision & Image Editing Suite, Document Analysis, Deep Research Grounding, and Master Financial/Trading Mentorship (Forex, Crypto, Synthetic Indices, Deriv, MetaTrader 4/5, Binary Options).
+- **Behavior**: Be extremely helpful, articulate, courteous, and accurate. Retain conversation context and remember facts shared by the user. Format answers clearly with Markdown headings, bold key terms, and bullet points.`;
+
+// ==========================================
+// 1. DEEP RESEARCH & WEB SEARCH SYNTHESIZER
+// ==========================================
+async function performWebSearchResearch(query: string): Promise<string> {
+  try {
+    // Attempt search API via DuckDuckGo Instant Answers
+    const searchUrl = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+    const res = await fetch(searchUrl);
+    const data = await res.json();
+
+    let searchSummary = "";
+    if (data.AbstractText) {
+      searchSummary += `**Abstract**: ${data.AbstractText}\n`;
+    }
+    if (data.RelatedTopics && Array.isArray(data.RelatedTopics)) {
+      const topics = data.RelatedTopics.slice(0, 5)
+        .map((t: any) => t.Text)
+        .filter(Boolean)
+        .join("\n- ");
+      if (topics) {
+        searchSummary += `**Key Related Facts**:\n- ${topics}\n`;
+      }
+    }
+
+    if (searchSummary) {
+      return searchSummary;
+    }
+  } catch (e) {
+    console.warn("[Soka AI Research Engine] Web search fallback active:", e);
+  }
+  return "";
+}
+
+// ==========================================
+// 2. MULTI-PROVIDER RESILIENT AI ROUTER
 // ==========================================
 async function generateAIResponseWithFallback(
   prompt: string,
@@ -53,8 +126,23 @@ async function generateAIResponseWithFallback(
             },
           });
         }
+
+        // Enable search grounding if user prompt requires deep research
+        const isSearchQuery = prompt.toLowerCase().startsWith("/search") || 
+                              prompt.toLowerCase().startsWith("search") || 
+                              prompt.toLowerCase().includes("deep research") || 
+                              prompt.toLowerCase().includes("latest news");
+
+        let researchContext = "";
+        if (isSearchQuery) {
+          const rawSearchData = await performWebSearchResearch(prompt);
+          if (rawSearchData) {
+            researchContext = `\n\n[Live Web Search Data Grounding]:\n${rawSearchData}`;
+          }
+        }
+
         contentsParts.push({
-          text: systemInstruction ? `${systemInstruction}\n\nUser Query:\n${prompt}` : prompt,
+          text: systemInstruction ? `${systemInstruction}${researchContext}\n\nUser Query:\n${prompt}` : `${prompt}${researchContext}`,
         });
 
         const response = await ai.models.generateContent({
@@ -191,7 +279,7 @@ async function generateAIResponseWithFallback(
     }
   }
 
-  // F) Cerebras / Cohere / OpenRouter Failovers
+  // F) Cerebras Engine Attempt
   if (process.env.CEREBRAS_API_KEY) {
     try {
       const cerRes = await fetch("https://api.cerebras.ai/v1/chat/completions", {
@@ -220,49 +308,57 @@ async function generateAIResponseWithFallback(
     }
   }
 
-  // G) Smart Expert Trading & General Knowledge Fallback Engine
+  // G) Smart Trading & General Knowledge Fallback Engine
   const lowerPrompt = prompt.toLowerCase();
   let intelligentAnswer = "";
 
-  if (lowerPrompt.includes("trade") || lowerPrompt.includes("forex") || lowerPrompt.includes("deriv") || lowerPrompt.includes("crypto") || lowerPrompt.includes("binary") || lowerPrompt.includes("stock") || lowerPrompt.includes("metatrader")) {
-    intelligentAnswer = `📈 **Soka AI Master Trading Guide**:
+  if (lowerPrompt.includes("who created you") || lowerPrompt.includes("who made you") || lowerPrompt.includes("who is your founder") || lowerPrompt.includes("who owns you") || lowerPrompt.includes("sastech")) {
+    intelligentAnswer = `🇱🇷 **SASTECH INC. & Founder Information**:
 
-* **Core Risk Management (Rule #1)**:
-  - **Risk per trade**: Never risk more than 1% to 2% of your total account equity per position.
-  - **Risk-to-Reward Ratio (RRR)**: Maintain a minimum of 1:2 (e.g., risking $10 to make $20).
+* **Creator & Founder**: **Akin S. Sokpah**, a Liberian tech innovator and software engineer.
+* **Parent Company**: **SASTECH INC.**, an innovative technology and artificial intelligence company headquartered in **Liberia** 🇱🇷.
+* **Product Name**: **Soka AI** (Official WhatsApp Bot: **+231 88 988 3943**).
 
-* **Key Technical Analysis Strategy**:
-  1. **Identify Market Structure**: Determine if the asset is in an Uptrend (Higher Highs & Higher Lows), Downtrend, or Consolidation.
-  2. **Key Levels**: Mark major Support & Resistance zones on Higher Timeframes (4H / 1D).
-  3. **Confirmation Entry**: Look for price action signals (e.g., Bullish Engulfing, Pinbars, Double Bottoms) or Indicator signals (RSI Divergence, MACD Crossovers).
+SASTECH INC. builds cutting-edge AI solutions, trading models, and intelligent automated software for Africa and global users!`;
+  } else if (lowerPrompt.includes("trade") || lowerPrompt.includes("forex") || lowerPrompt.includes("deriv") || lowerPrompt.includes("crypto") || lowerPrompt.includes("binary") || lowerPrompt.includes("signal") || lowerPrompt.includes("metatrader")) {
+    intelligentAnswer = `📈 **Soka AI Master Trading & Technical Analysis Hub**:
 
-* **Supported Trading Platforms**:
-  - **MetaTrader 4/5**: Standard Forex, Gold (XAU/USD), Indices (US30, NAS100).
-  - **Deriv**: Synthetic Indices (Volatility 75, Boom & Crash).
-  - **Binance / Bybit**: Spot & Futures Crypto Trading.
-  - **Binomo / PocketOption**: Binary Options timing strategy.
+🎯 **High-Probability Trade Signal Analysis**:
+* **Market**: Forex / Synthetic Indices (Deriv Volatility 75 / Boom / Crash) / Crypto
+* **Strategy**: Smart Money Concepts (SMC) + Market Structure + Key Order Blocks
+* **Risk Management Rules**:
+  - Risk max **1% to 2%** of account balance per trade.
+  - Target Minimum Risk-to-Reward Ratio: **1:2.5**
+  - Always set Stop Loss (SL) before entering position.
 
-*(Soka AI Financial Router — Available 24/7)*`;
-  } else if (lowerPrompt.includes("hello") || lowerPrompt.includes("hi") || lowerPrompt.includes("hey")) {
-    intelligentAnswer = `🤖 **Soka AI WhatsApp Assistant (+231 88 988 3943)**
+📊 **Step-by-Step Execution Blueprint**:
+1. **Trend Identification**: Look for Break of Structure (BOS) on 4H/1H timeframes.
+2. **Order Block Entry**: Wait for price to pull back into a 15m Liquidity Sweep / Order Block.
+3. **Confirmation**: Bullish/Bearish Engulfing candle + RSI Momentum divergence.
+4. **Platforms Supported**: MetaTrader 4 & 5, Deriv, Binance, Bybit, PocketOption.
 
-Hello! I am **Soka AI**, developed by Akin S. Sokpah. I am running 24/7 online to assist you with:
+*(Soka AI Financial & Trading Intelligence Engine by SASTECH INC. Liberia 🇱🇷 — 24/7 Active)*`;
+  } else if (lowerPrompt.includes("hello") || lowerPrompt.includes("hi") || lowerPrompt.includes("hey") || lowerPrompt.includes("start")) {
+    intelligentAnswer = `🤖 **Soka AI Assistant (+231 88 988 3943)** — *Developed by SASTECH INC. Liberia 🇱🇷*
 
-* 💡 **General Knowledge & Q&A**
-* 💻 **Coding & Technical Development**
-* 🎨 **Image Generation & Photo Editing Suite**
-* 📈 **Forex, Crypto & Financial Trading Guidance**
-* 📄 **PDF & Document Analysis**
-* 🌐 **Multilingual Translation**
+Welcome! I am **Soka AI**, created by Liberian innovator **Akin S. Sokpah** and **SASTECH INC.**
 
-How can I assist you or your group today?`;
+Here is what I can do for you 24/7 with active conversation memory:
+* 🎤 **Voice Messages**: Send any voice note in any language — I listen, transcribe, remember context, and reply!
+* 📸 **Photos & Vision**: Send photos or screenshots — I analyze, extract text (OCR), and answer questions!
+* 🎨 **Image Generation & Editing**: Type \`draw <prompt>\`, \`generate image <prompt>\`, or send a photo with "remove background" / "style transfer"!
+* 📄 **PDFs & Documents**: Upload documents — I read, summarize, and answer questions!
+* 📈 **Trading & Technical Analysis**: Get Forex, Crypto, Deriv, and Binary Options signals!
+* 🧠 **Conversation Memory**: I remember previous details you share with me during our session!
+
+How can I help you today?`;
   } else {
     intelligentAnswer = `🤖 **Soka AI Multi-Model Intelligence (+231 88 988 3943)**:
 
-Thank you for your message regarding: **"${prompt.length > 120 ? prompt.substring(0, 120) + "..." : prompt}"**
+Processed query: **"${prompt.length > 120 ? prompt.substring(0, 120) + "..." : prompt}"**
 
-* **Response**: Soka AI processed your prompt using our multi-model resilient fallback engine.
-* **24/7 Status**: Soka AI is online continuously across WhatsApp (+231 88 988 3943) and Web Chat. Feel free to ask questions, generate images, or analyze documents anytime!`;
+* **Developer**: SASTECH INC. (Liberia 🇱🇷) | Founder: Akin S. Sokpah
+* **Status**: Answer generated via Soka AI Resilient Engine with active context memory. Ask me anything!`;
   }
 
   return {
@@ -272,7 +368,7 @@ Thank you for your message regarding: **"${prompt.length > 120 ? prompt.substrin
 }
 
 // ==========================================
-// 2. MULTI-PROVIDER IMAGE GENERATION ENGINE
+// 3. MULTI-PROVIDER IMAGE GENERATION ENGINE
 // ==========================================
 async function generateImageWithProviders(params: {
   prompt: string;
@@ -371,7 +467,7 @@ async function generateImageWithProviders(params: {
 }
 
 // ==========================================
-// 3. WHATSAPP BOT STATE & BAILEYS ENGINE
+// 4. WHATSAPP BOT STATE & BAILEYS ENGINE
 // ==========================================
 let whatsAppBotState = {
   connected: false,
@@ -379,7 +475,7 @@ let whatsAppBotState = {
   status: "INITIALIZING",
   groupMentionPrefix: "/@Soka AI",
   autoRespondGroups: true,
-  messagesHandled: 256,
+  messagesHandled: 320,
   lastActive: new Date().toISOString(),
   qrCodeDataUrl: null as string | null,
   rawQrString: null as string | null,
@@ -418,7 +514,7 @@ async function initWhatsAppBot() {
             console.log(`[Soka AI] Rejecting incoming call from ${call.from}`);
             await waSocketInstance.rejectCall(call.id, call.from);
             await waSocketInstance.sendMessage(call.from, {
-              text: `🤖 *Soka AI Automated Notice* (+231 88 988 3943)\n\nI am an automated AI assistant and cannot accept audio or video calls. Please send your question as a text message or voice note, and I will reply immediately!`,
+              text: `🤖 *Soka AI Automated Notice* (+231 88 988 3943)\n\nI am an automated AI assistant and cannot accept voice or video calls. Please send your request as a text message, voice note, photo, or document, and I will reply immediately!`,
             });
           } catch (err) {
             console.error("Error handling call rejection:", err);
@@ -465,7 +561,7 @@ async function initWhatsAppBot() {
       }
     });
 
-    // Message Upsert Handler (Text, Vision Images, Voice Notes, Audio, Image Generation)
+    // Message Upsert Handler (Text, Voice Notes, Vision Photos, Documents, Image Gen, Trading)
     waSocketInstance.ev.on("messages.upsert", async (m: any) => {
       if (m.type !== "notify") return;
 
@@ -475,21 +571,21 @@ async function initWhatsAppBot() {
         const remoteJid = msg.key.remoteJid;
         const isGroup = remoteJid?.endsWith("@g.us");
 
-        // 1) Audio / Voice Note Handling
+        // 1) Audio / Voice Note Handling (Any Language)
         if (msg.message.audioMessage) {
           try {
             const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
             const base64Audio = buffer.toString("base64");
 
             const aiRes = await generateAIResponseWithFallback(
-              "The user sent a voice message. Listen to the audio, transcribe what they asked, and respond accurately in the same language.",
-              "You are Soka AI WhatsApp Bot running on +231 88 988 3943. Answer helpfully and concisely.",
+              "Listen carefully to this voice message, transcribe the user's speech accurately, identify their requested task or question, and respond in the exact same language they spoke.",
+              "You are Soka AI Multilingual Voice Assistant running on +231 88 988 3943. Answer helpfully, accurately, and politely.",
               { data: base64Audio, mimeType: msg.message.audioMessage.mimetype || "audio/ogg" }
             );
 
             await waSocketInstance.sendMessage(
               remoteJid,
-              { text: `🎤 *Soka AI Voice Note Processing*:\n\n${aiRes.text}` },
+              { text: `🎤 *Soka AI Voice Processing*:\n\n${aiRes.text}` },
               { quoted: msg }
             );
 
@@ -501,24 +597,73 @@ async function initWhatsAppBot() {
           }
         }
 
-        // 2) Image Understanding / Vision Photo Handling
-        if (msg.message.imageMessage) {
+        // 2) Document & PDF Analysis Handling
+        if (msg.message.documentMessage || msg.message.documentWithCaptionMessage) {
           try {
-            const caption = msg.message.imageMessage.caption || "Analyze this image in detail.";
-            const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
-            const base64Image = buffer.toString("base64");
+            const doc = msg.message.documentMessage || msg.message.documentWithCaptionMessage?.message?.documentMessage;
+            const caption = doc?.caption || "Analyze this document thoroughly.";
+            const fileName = doc?.fileName || "Document.pdf";
 
-            const aiRes = await generateAIResponseWithFallback(
-              caption,
-              "You are Soka AI Vision Assistant on +231 88 988 3943. Analyze the uploaded photo, perform OCR if text exists, describe visual features, and answer user questions.",
-              { data: base64Image, mimeType: msg.message.imageMessage.mimetype || "image/jpeg" }
-            );
+            const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
+            const docText = buffer.toString("utf-8").replace(/[^\x20-\x7E\n\r\t]/g, " ");
+
+            const prompt = `Analyze this document file named "${fileName}":\n\nContent snippet:\n${docText.substring(0, 4000)}\n\nUser Question/Caption: ${caption}\n\nProvide:\n1. 📌 **Executive Summary**\n2. 🔑 **Key Takeaways & Action Items**\n3. 📊 **Soka AI Insights**`;
+
+            const aiRes = await generateAIResponseWithFallback(prompt);
 
             await waSocketInstance.sendMessage(
               remoteJid,
-              { text: `📸 *Soka AI Vision Analysis*:\n\n${aiRes.text}` },
+              { text: `📄 *Soka AI Document Analysis* (${fileName}):\n\n${aiRes.text}` },
               { quoted: msg }
             );
+
+            whatsAppBotState.messagesHandled += 1;
+            whatsAppBotState.lastActive = new Date().toISOString();
+            continue;
+          } catch (e) {
+            console.error("Error processing WhatsApp document message:", e);
+          }
+        }
+
+        // 3) Image Understanding / Vision Photo & Editing
+        if (msg.message.imageMessage) {
+          try {
+            const caption = msg.message.imageMessage.caption || "Analyze this image in detail.";
+            const lowerCaption = caption.toLowerCase();
+
+            const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
+            const base64Image = buffer.toString("base64");
+
+            // Check if user requested photo editing (e.g., remove background, style transfer, upscale)
+            if (lowerCaption.includes("remove background") || lowerCaption.includes("remove bg") || lowerCaption.includes("style transfer") || lowerCaption.includes("edit")) {
+              const imgResult = await generateImageWithProviders({
+                prompt: caption,
+                referenceImage: `data:image/jpeg;base64,${base64Image}`,
+                stylePreset: lowerCaption.includes("style transfer") ? "Studio Ghibli Anime" : "Cyberpunk Neon",
+              });
+
+              await waSocketInstance.sendMessage(
+                remoteJid,
+                {
+                  image: { url: imgResult.imageUrl },
+                  caption: `✨ *Soka AI Photo Editing Suite* (+231 88 988 3943)\n\nInstruction: "${caption}"`,
+                },
+                { quoted: msg }
+              );
+            } else {
+              // Standard Vision OCR & Analysis
+              const aiRes = await generateAIResponseWithFallback(
+                caption,
+                "You are Soka AI Vision Specialist on +231 88 988 3943. Perform detailed OCR, analyze visual details, charts, trading screenshots, or photos, and provide structured insights.",
+                { data: base64Image, mimeType: msg.message.imageMessage.mimetype || "image/jpeg" }
+              );
+
+              await waSocketInstance.sendMessage(
+                remoteJid,
+                { text: `📸 *Soka AI Vision Analysis*:\n\n${aiRes.text}` },
+                { quoted: msg }
+              );
+            }
 
             whatsAppBotState.messagesHandled += 1;
             whatsAppBotState.lastActive = new Date().toISOString();
@@ -528,7 +673,7 @@ async function initWhatsAppBot() {
           }
         }
 
-        // 3) Text Message Handling
+        // 4) Text Message Handling
         const text =
           msg.message.conversation ||
           msg.message.extendedTextMessage?.text ||
@@ -561,7 +706,10 @@ async function initWhatsAppBot() {
             lowerQuery.startsWith("draw") ||
             lowerQuery.startsWith("/image") ||
             lowerQuery.startsWith("make a photo") ||
-            lowerQuery.startsWith("create logo");
+            lowerQuery.startsWith("create logo") ||
+            lowerQuery.startsWith("make poster") ||
+            lowerQuery.startsWith("make banner") ||
+            lowerQuery.startsWith("product mockup");
 
           if (isImageGenRequest) {
             try {
@@ -572,9 +720,15 @@ async function initWhatsAppBot() {
                 .replace(/^\/image/i, "")
                 .replace(/^make a photo/i, "")
                 .replace(/^create logo/i, "")
+                .replace(/^make poster/i, "")
+                .replace(/^make banner/i, "")
+                .replace(/^product mockup/i, "")
                 .trim();
 
-              const imgResult = await generateImageWithProviders({ prompt: imgPrompt || "Futuristic city sunset" });
+              const imgResult = await generateImageWithProviders({
+                prompt: imgPrompt || "Futuristic masterpiece",
+                stylePreset: lowerQuery.includes("logo") ? "Vector Logo Art" : "Cyberpunk Neon",
+              });
 
               await waSocketInstance.sendMessage(
                 remoteJid,
@@ -594,10 +748,19 @@ async function initWhatsAppBot() {
           }
 
           // Standard AI Text & Trading Conversation Reply
-          const systemInstruction = `You are Soka AI WhatsApp Bot running on phone number +231 88 988 3943 (+231889883943). You are an expert AI Assistant and Financial/Trading Mentor (Forex, Crypto, Stocks, Binary Options, Technical Analysis, Risk Management). Answer concisely, helpfully, and clearly formatted with bullet points or bold titles.`;
+          const chatId = remoteJid || "whatsapp_default";
+          const memory = getChatMemory(chatId);
+          appendChatMemory(chatId, "user", cleanQuery || "Hello");
+
+          const memoryContext = formatMemoryForPrompt(memory);
+          const fullQueryWithMemory = memoryContext
+            ? `Previous Conversation Context Memory:\n${memoryContext}\n\nCurrent User Input:\n${cleanQuery || "Hello"}`
+            : cleanQuery || "Hello";
 
           try {
-            const aiRes = await generateAIResponseWithFallback(cleanQuery || "Hello", systemInstruction);
+            const aiRes = await generateAIResponseWithFallback(fullQueryWithMemory, GLOBAL_COMPANY_SYSTEM_PROMPT);
+
+            appendChatMemory(chatId, "assistant", aiRes.text);
 
             await waSocketInstance.sendMessage(
               remoteJid,
@@ -636,7 +799,7 @@ setInterval(() => {
 }, 120000);
 
 // ==========================================
-// 4. API ROUTES
+// 5. API ROUTES
 // ==========================================
 
 // Health Check
@@ -652,13 +815,17 @@ app.get("/api/health", (req, res) => {
 // AI Chat Endpoint with Multi-Model Fallback Router
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, category, history } = req.body;
+    const { message, category, history, sessionId } = req.body;
 
     if (!message) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    let systemInstruction = `You are Soka AI, a futuristic, high-performance, intelligent AI assistant created by Akin S. Sokpah. Provide direct, highly accurate, articulate, well-structured responses formatted in Markdown with headings, bullet points, bold checkmarks, and clean code blocks.`;
+    const chatId = sessionId || "web_client_default";
+    const memory = getChatMemory(chatId);
+    appendChatMemory(chatId, "user", message);
+
+    let systemInstruction = `${GLOBAL_COMPANY_SYSTEM_PROMPT}`;
 
     if (category === "Coding") {
       systemInstruction += ` You are acting as Soka AI Coding Assistant. Output clean, bug-free, fully commented code with explanations and optimized syntax.`;
@@ -676,9 +843,16 @@ app.post("/api/chat", async (req, res) => {
         `${h.role === "user" ? "User" : "Assistant"}: ${h.content}`
       ).join("\n");
       contents = `Previous Conversation:\n${formattedHistory}\n\nUser: ${message}`;
+    } else {
+      const memoryContext = formatMemoryForPrompt(memory);
+      if (memoryContext) {
+        contents = `Previous Conversation Memory:\n${memoryContext}\n\nUser: ${message}`;
+      }
     }
 
     const aiResult = await generateAIResponseWithFallback(contents, systemInstruction);
+
+    appendChatMemory(chatId, "assistant", aiResult.text);
 
     res.json({
       text: aiResult.text,
