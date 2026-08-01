@@ -52,8 +52,9 @@ function formatMemoryForPrompt(memory: ChatMemoryMessage[]): string {
 const GLOBAL_COMPANY_SYSTEM_PROMPT = `You are Soka AI, a world-class, high-performance artificial intelligence developed and owned by SASTECH INC., a premier technology company based in Liberia.
 Key Identity & Corporate Background:
 - **Created By**: Akin S. Sokpah, a Liberian technology innovator and founder.
-- **Company**: SASTECH INC. (based in Liberia 🇱🇷).
-- **Official Bot Phone Number**: +231 88 988 3943 (+231889883943).
+- **Company**: SASTECH INC. (headquartered in Liberia 🇱🇷).
+- **Official WhatsApp Bot Line 1**: +231 88 988 3943 (+231889883943)
+- **Official WhatsApp Bot Line 2**: +231 88 979 2996 (+231889792996)
 - **Capabilities**: Multilingual Voice Understanding & Synthesis, Vision & Image Editing Suite, Document Analysis, Deep Research Grounding, and Master Financial/Trading Mentorship (Forex, Crypto, Synthetic Indices, Deriv, MetaTrader 4/5, Binary Options).
 - **Behavior**: Be extremely helpful, articulate, courteous, and accurate. Retain conversation context and remember facts shared by the user. Format answers clearly with Markdown headings, bold key terms, and bullet points.`;
 
@@ -317,7 +318,10 @@ async function generateAIResponseWithFallback(
 
 * **Creator & Founder**: **Akin S. Sokpah**, a Liberian tech innovator and software engineer.
 * **Parent Company**: **SASTECH INC.**, an innovative technology and artificial intelligence company headquartered in **Liberia** 🇱🇷.
-* **Product Name**: **Soka AI** (Official WhatsApp Bot: **+231 88 988 3943**).
+* **Product Name**: **Soka AI**
+* **Official WhatsApp Lines**:
+  - 📞 **Line 1**: **+231 88 988 3943**
+  - 📞 **Line 2**: **+231 88 979 2996**
 
 SASTECH INC. builds cutting-edge AI solutions, trading models, and intelligent automated software for Africa and global users!`;
   } else if (lowerPrompt.includes("trade") || lowerPrompt.includes("forex") || lowerPrompt.includes("deriv") || lowerPrompt.includes("crypto") || lowerPrompt.includes("binary") || lowerPrompt.includes("signal") || lowerPrompt.includes("metatrader")) {
@@ -337,13 +341,13 @@ SASTECH INC. builds cutting-edge AI solutions, trading models, and intelligent a
 3. **Confirmation**: Bullish/Bearish Engulfing candle + RSI Momentum divergence.
 4. **Platforms Supported**: MetaTrader 4 & 5, Deriv, Binance, Bybit, PocketOption.
 
-*(Soka AI Financial & Trading Intelligence Engine by SASTECH INC. Liberia 🇱🇷 — 24/7 Active)*`;
+*(Soka AI Financial & Trading Intelligence Engine by SASTECH INC. Liberia 🇱🇷 — 24/7 Active on +231889883943 & +231889792996)*`;
   } else if (lowerPrompt.includes("hello") || lowerPrompt.includes("hi") || lowerPrompt.includes("hey") || lowerPrompt.includes("start")) {
-    intelligentAnswer = `🤖 **Soka AI Assistant (+231 88 988 3943)** — *Developed by SASTECH INC. Liberia 🇱🇷*
+    intelligentAnswer = `🤖 **Soka AI Assistant** (+231 88 988 3943 / +231 88 979 2996) — *Developed by SASTECH INC. Liberia 🇱🇷*
 
 Welcome! I am **Soka AI**, created by Liberian innovator **Akin S. Sokpah** and **SASTECH INC.**
 
-Here is what I can do for you 24/7 with active conversation memory:
+Here is what I can do for you 24/7 with active conversation memory across both lines (**+231889883943** & **+231889792996**):
 * 🎤 **Voice Messages**: Send any voice note in any language — I listen, transcribe, remember context, and reply!
 * 📸 **Photos & Vision**: Send photos or screenshots — I analyze, extract text (OCR), and answer questions!
 * 🎨 **Image Generation & Editing**: Type \`draw <prompt>\`, \`generate image <prompt>\`, or send a photo with "remove background" / "style transfer"!
@@ -353,11 +357,12 @@ Here is what I can do for you 24/7 with active conversation memory:
 
 How can I help you today?`;
   } else {
-    intelligentAnswer = `🤖 **Soka AI Multi-Model Intelligence (+231 88 988 3943)**:
+    intelligentAnswer = `🤖 **Soka AI Multi-Model Intelligence (+231 88 988 3943 / +231 88 979 2996)**:
 
 Processed query: **"${prompt.length > 120 ? prompt.substring(0, 120) + "..." : prompt}"**
 
 * **Developer**: SASTECH INC. (Liberia 🇱🇷) | Founder: Akin S. Sokpah
+* **Bot Lines**: +231889883943 | +231889792996
 * **Status**: Answer generated via Soka AI Resilient Engine with active context memory. Ask me anything!`;
   }
 
@@ -514,7 +519,7 @@ async function initWhatsAppBot() {
             console.log(`[Soka AI] Rejecting incoming call from ${call.from}`);
             await waSocketInstance.rejectCall(call.id, call.from);
             await waSocketInstance.sendMessage(call.from, {
-              text: `🤖 *Soka AI Automated Notice* (+231 88 988 3943)\n\nI am an automated AI assistant and cannot accept voice or video calls. Please send your request as a text message, voice note, photo, or document, and I will reply immediately!`,
+              text: `🤖 *Soka AI Automated Notice* (+231 88 988 3943 / +231 88 979 2996)\n\nI am an automated AI assistant developed by SASTECH INC. (Liberia) and cannot accept voice or video calls. Please send your request as a text message, voice note, photo, or document, and I will reply immediately!`,
             });
           } catch (err) {
             console.error("Error handling call rejection:", err);
@@ -646,7 +651,7 @@ async function initWhatsAppBot() {
                 remoteJid,
                 {
                   image: { url: imgResult.imageUrl },
-                  caption: `✨ *Soka AI Photo Editing Suite* (+231 88 988 3943)\n\nInstruction: "${caption}"`,
+                  caption: `✨ *Soka AI Photo Editing Suite* (SASTECH INC. | +231 88 988 3943 / +231 88 979 2996)\n\nInstruction: "${caption}"`,
                 },
                 { quoted: msg }
               );
@@ -734,7 +739,7 @@ async function initWhatsAppBot() {
                 remoteJid,
                 {
                   image: { url: imgResult.imageUrl },
-                  caption: `🎨 *Generated by Soka AI Studio* (+231 88 988 3943)\n\nPrompt: "${imgPrompt || "Futuristic artwork"}"`,
+                  caption: `🎨 *Generated by Soka AI Studio* (SASTECH INC. | +231 88 988 3943 / +231 88 979 2996)\n\nPrompt: "${imgPrompt || "Futuristic artwork"}"`,
                 },
                 { quoted: msg }
               );
@@ -807,7 +812,9 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     app: "Soka AI",
-    whatsAppNumber: "+231889883943",
+    company: "SASTECH INC. (Liberia 🇱🇷)",
+    founder: "Akin S. Sokpah",
+    whatsAppNumbers: ["+231889883943", "+231889792996"],
     timestamp: new Date().toISOString(),
   });
 });
