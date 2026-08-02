@@ -49,14 +49,77 @@ function formatMemoryForPrompt(memory: ChatMemoryMessage[]): string {
     .join("\n");
 }
 
-const GLOBAL_COMPANY_SYSTEM_PROMPT = `You are Soka AI, a world-class, high-performance artificial intelligence developed and owned by SASTECH INC., a premier technology company based in Liberia.
-Key Identity & Corporate Background:
-- **Created By**: Akin S. Sokpah, a Liberian technology innovator and founder.
-- **Company**: SASTECH INC. (headquartered in Liberia 🇱🇷).
-- **Official WhatsApp Bot Line 1**: +231 88 988 3943 (+231889883943)
-- **Official WhatsApp Bot Line 2**: +231 88 979 2996 (+231889792996)
-- **Capabilities**: Multilingual Voice Understanding & Synthesis, Vision & Image Editing Suite, Document Analysis, Deep Research Grounding, and Master Financial/Trading Mentorship (Forex, Crypto, Synthetic Indices, Deriv, MetaTrader 4/5, Binary Options).
-- **Behavior**: Be extremely helpful, articulate, courteous, and accurate. Retain conversation context and remember facts shared by the user. Format answers clearly with Markdown headings, bold key terms, and bullet points.`;
+const GLOBAL_COMPANY_SYSTEM_PROMPT = `You are Soka AI, a world-class, high-performance artificial intelligence developed and owned by SASTECH INC., a premier technology company based in Liberia, founded by Akin S. Sokpah.
+Official WhatsApp Bot Numbers: +231 88 988 3943 and +231 88 979 2996.
+
+RESPONSE STYLE & BEHAVIOR MANDATES:
+1. Speak naturally, intelligently, clearly, and direct to the point.
+2. DO NOT use artificial symbols, AI icons, emojis, or robotic headers (such as 🤖, 🎤, 📸, 🎨, 📌, 🔑, 📊, ✨, or robotic bold tags) UNLESS the user explicitly asks for symbols, emojis, or specific formatting.
+3. Keep answers simple yet advanced, conversational, and direct.
+4. Support ALL languages seamlessly (English, Liberian Kreyol/Patois, French, Spanish, Arabic, Mandingo, Bassa, Kru, Yoruba, Swahili, German, Portuguese, Chinese, etc.). Respond directly in the exact language the user speaks or writes in.
+5. Retain conversation context and remember facts shared by the user.`;
+
+function isImageGenerationRequest(text: string): boolean {
+  if (!text) return false;
+  const lower = text.toLowerCase().trim();
+  const patterns = [
+    /^draw/i,
+    /^generate image/i,
+    /^generate photo/i,
+    /^create image/i,
+    /^create photo/i,
+    /^make a photo/i,
+    /^make an image/i,
+    /^make a picture/i,
+    /^picture of/i,
+    /^photo of/i,
+    /^paint/i,
+    /^sketch/i,
+    /^render/i,
+    /^\/image/i,
+    /^image of/i,
+    /generate an? (image|photo|picture|logo|drawing|illustration|poster|banner)/i,
+    /create an? (image|photo|picture|logo|drawing|illustration|poster|banner)/i,
+    /make an? (image|photo|picture|logo|drawing|illustration|poster|banner)/i,
+    /draw (me |a |an |the )/i,
+    /can you (draw|generate|create|make) (an?|a)? (image|photo|picture|logo|drawing)/i,
+    /i want (an?|a)? (image|photo|picture|logo|drawing)/i,
+    /show me (an?|a)? (image|photo|picture)/i
+  ];
+  return patterns.some((p) => p.test(lower));
+}
+
+function extractImagePrompt(text: string): string {
+  if (!text) return "";
+  let prompt = text.trim();
+  const prefixesToRemove = [
+    /^can you (please )?(draw|generate|create|make) (me )?(an?|a)? (image|photo|picture|logo|drawing)? (of)?/i,
+    /^please (draw|generate|create|make) (me )?(an?|a)? (image|photo|picture|logo|drawing)? (of)?/i,
+    /^generate image (of)?/i,
+    /^generate photo (of)?/i,
+    /^create image (of)?/i,
+    /^create photo (of)?/i,
+    /^make an image (of)?/i,
+    /^make a photo (of)?/i,
+    /^make a picture (of)?/i,
+    /^draw me (an?|a)? (image|photo|picture)? (of)?/i,
+    /^draw (an?|a)? (image|photo|picture)? (of)?/i,
+    /^\/image/i,
+    /^image of/i,
+    /^picture of/i,
+    /^photo of/i,
+    /^paint (a|an|the)?/i,
+    /^sketch (a|an|the)?/i,
+    /^render (a|an|the)?/i,
+    /^show me (an?|a)? (image|photo|picture) (of)?/i,
+    /^i want (an?|a)? (image|photo|picture) (of)?/i
+  ];
+
+  for (const prefix of prefixesToRemove) {
+    prompt = prompt.replace(prefix, "").trim();
+  }
+  return prompt || text;
+}
 
 // ==========================================
 // 1. DEEP RESEARCH & WEB SEARCH SYNTHESIZER
@@ -519,7 +582,7 @@ async function initWhatsAppBot() {
             console.log(`[Soka AI] Rejecting incoming call from ${call.from}`);
             await waSocketInstance.rejectCall(call.id, call.from);
             await waSocketInstance.sendMessage(call.from, {
-              text: `🤖 *Soka AI Automated Notice* (+231 88 988 3943 / +231 88 979 2996)\n\nI am an automated AI assistant developed by SASTECH INC. (Liberia) and cannot accept voice or video calls. Please send your request as a text message, voice note, photo, or document, and I will reply immediately!`,
+              text: `I am Soka AI, an automated AI assistant developed by SASTECH INC. (Liberia). I cannot accept voice or video calls, but please send your message, voice note, photo, or document here and I will assist you immediately.`,
             });
           } catch (err) {
             console.error("Error handling call rejection:", err);
@@ -542,7 +605,7 @@ async function initWhatsAppBot() {
             width: 360,
             margin: 2,
           });
-          console.log("⚡ [Soka AI] Baileys WhatsApp QR Code Generated for +231 88 988 3943!");
+          console.log("⚡ [Soka AI] Baileys WhatsApp QR Code Generated for +231 88 988 3943 / +231 88 979 2996!");
         } catch (err) {
           console.error("QR Code Conversion Error:", err);
         }
@@ -562,11 +625,11 @@ async function initWhatsAppBot() {
         whatsAppBotState.connected = true;
         whatsAppBotState.status = "ONLINE_ACTIVE";
         whatsAppBotState.qrCodeDataUrl = null;
-        console.log("✅ [Soka AI] Baileys WhatsApp Bot (+231 88 988 3943) Connected & Online 24/7!");
+        console.log("✅ [Soka AI] Baileys WhatsApp Bot (+231 88 988 3943 / +231 88 979 2996) Connected & Online 24/7!");
       }
     });
 
-    // Message Upsert Handler (Text, Voice Notes, Vision Photos, Documents, Image Gen, Trading)
+    // Message Upsert Handler (Text, Voice Notes, Vision Photos, Documents, Image Gen)
     waSocketInstance.ev.on("messages.upsert", async (m: any) => {
       if (m.type !== "notify") return;
 
@@ -579,18 +642,35 @@ async function initWhatsAppBot() {
         // 1) Audio / Voice Note Handling (Any Language)
         if (msg.message.audioMessage) {
           try {
+            const chatId = remoteJid || "whatsapp_default";
+            const memory = getChatMemory(chatId);
+            appendChatMemory(chatId, "user", "[Voice Note Sent by User]");
+
             const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
             const base64Audio = buffer.toString("base64");
 
+            const memoryContext = formatMemoryForPrompt(memory);
+            const voiceInstruction = `${GLOBAL_COMPANY_SYSTEM_PROMPT}
+
+You are processing a voice message sent by the user in audio form.
+1. Listen carefully to the audio message.
+2. Identify the language spoken and accurately understand what the user said or asked.
+3. Formulate a direct, highly intelligent, simple yet advanced response.
+4. Respond in the EXACT SAME LANGUAGE spoken in the voice message.
+5. DO NOT use artificial symbols, AI icons, or robotic headers. Answer cleanly and naturally.
+${memoryContext ? `\nPrevious Conversation Context:\n${memoryContext}` : ""}`;
+
             const aiRes = await generateAIResponseWithFallback(
-              "Listen carefully to this voice message, transcribe the user's speech accurately, identify their requested task or question, and respond in the exact same language they spoke.",
-              "You are Soka AI Multilingual Voice Assistant running on +231 88 988 3943. Answer helpfully, accurately, and politely.",
+              "Process and answer this voice message directly in the user's spoken language.",
+              voiceInstruction,
               { data: base64Audio, mimeType: msg.message.audioMessage.mimetype || "audio/ogg" }
             );
 
+            appendChatMemory(chatId, "assistant", aiRes.text);
+
             await waSocketInstance.sendMessage(
               remoteJid,
-              { text: `🎤 *Soka AI Voice Processing*:\n\n${aiRes.text}` },
+              { text: aiRes.text },
               { quoted: msg }
             );
 
@@ -605,20 +685,27 @@ async function initWhatsAppBot() {
         // 2) Document & PDF Analysis Handling
         if (msg.message.documentMessage || msg.message.documentWithCaptionMessage) {
           try {
+            const chatId = remoteJid || "whatsapp_default";
+            const memory = getChatMemory(chatId);
+
             const doc = msg.message.documentMessage || msg.message.documentWithCaptionMessage?.message?.documentMessage;
             const caption = doc?.caption || "Analyze this document thoroughly.";
             const fileName = doc?.fileName || "Document.pdf";
 
+            appendChatMemory(chatId, "user", `[Document Sent by User]: ${fileName} - ${caption}`);
+
             const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
             const docText = buffer.toString("utf-8").replace(/[^\x20-\x7E\n\r\t]/g, " ");
 
-            const prompt = `Analyze this document file named "${fileName}":\n\nContent snippet:\n${docText.substring(0, 4000)}\n\nUser Question/Caption: ${caption}\n\nProvide:\n1. 📌 **Executive Summary**\n2. 🔑 **Key Takeaways & Action Items**\n3. 📊 **Soka AI Insights**`;
+            const prompt = `Analyze this document file named "${fileName}":\n\nContent snippet:\n${docText.substring(0, 4000)}\n\nUser Question/Caption: ${caption}`;
 
-            const aiRes = await generateAIResponseWithFallback(prompt);
+            const aiRes = await generateAIResponseWithFallback(prompt, GLOBAL_COMPANY_SYSTEM_PROMPT);
+
+            appendChatMemory(chatId, "assistant", aiRes.text);
 
             await waSocketInstance.sendMessage(
               remoteJid,
-              { text: `📄 *Soka AI Document Analysis* (${fileName}):\n\n${aiRes.text}` },
+              { text: aiRes.text },
               { quoted: msg }
             );
 
@@ -633,13 +720,16 @@ async function initWhatsAppBot() {
         // 3) Image Understanding / Vision Photo & Editing
         if (msg.message.imageMessage) {
           try {
-            const caption = msg.message.imageMessage.caption || "Analyze this image in detail.";
+            const chatId = remoteJid || "whatsapp_default";
+            const memory = getChatMemory(chatId);
+
+            const caption = msg.message.imageMessage.caption || "Analyze this image.";
             const lowerCaption = caption.toLowerCase();
 
             const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
             const base64Image = buffer.toString("base64");
 
-            // Check if user requested photo editing (e.g., remove background, style transfer, upscale)
+            // Check if photo edit, style transfer, or image generation requested from photo
             if (lowerCaption.includes("remove background") || lowerCaption.includes("remove bg") || lowerCaption.includes("style transfer") || lowerCaption.includes("edit")) {
               const imgResult = await generateImageWithProviders({
                 prompt: caption,
@@ -651,21 +741,48 @@ async function initWhatsAppBot() {
                 remoteJid,
                 {
                   image: { url: imgResult.imageUrl },
-                  caption: `✨ *Soka AI Photo Editing Suite* (SASTECH INC. | +231 88 988 3943 / +231 88 979 2996)\n\nInstruction: "${caption}"`,
+                  caption: `Prompt: ${caption}`,
+                },
+                { quoted: msg }
+              );
+            } else if (isImageGenerationRequest(caption)) {
+              const imgPrompt = extractImagePrompt(caption);
+              const imgResult = await generateImageWithProviders({
+                prompt: imgPrompt || "Creative visual",
+              });
+
+              await waSocketInstance.sendMessage(
+                remoteJid,
+                {
+                  image: { url: imgResult.imageUrl },
+                  caption: `Prompt: ${imgPrompt}`,
                 },
                 { quoted: msg }
               );
             } else {
-              // Standard Vision OCR & Analysis
+              // Standard Vision OCR, Object Recognition, Problem Solving
+              appendChatMemory(chatId, "user", `[Photo Sent by User]: ${caption}`);
+              const memoryContext = formatMemoryForPrompt(memory);
+
+              const visionInstruction = `${GLOBAL_COMPANY_SYSTEM_PROMPT}
+
+You are analyzing an image sent by the user (photo, screenshot, document, diagram, math problem, object, face, landmark, chart, or text).
+1. Perform detailed vision analysis and OCR text extraction if needed.
+2. Answer the user's question about the image directly in whatever language they spoke/wrote or is in the image.
+3. Keep your response simple, advanced, natural, direct to the point, and free of artificial symbols, AI signs, or robotic headers unless explicitly requested.
+${memoryContext ? `\nPrevious Conversation Context:\n${memoryContext}` : ""}`;
+
               const aiRes = await generateAIResponseWithFallback(
                 caption,
-                "You are Soka AI Vision Specialist on +231 88 988 3943. Perform detailed OCR, analyze visual details, charts, trading screenshots, or photos, and provide structured insights.",
+                visionInstruction,
                 { data: base64Image, mimeType: msg.message.imageMessage.mimetype || "image/jpeg" }
               );
 
+              appendChatMemory(chatId, "assistant", aiRes.text);
+
               await waSocketInstance.sendMessage(
                 remoteJid,
-                { text: `📸 *Soka AI Vision Analysis*:\n\n${aiRes.text}` },
+                { text: aiRes.text },
                 { quoted: msg }
               );
             }
@@ -703,43 +820,27 @@ async function initWhatsAppBot() {
             .replace(/^soka/i, "")
             .trim();
 
-          // Check if request is for Image Generation
-          const lowerQuery = cleanQuery.toLowerCase();
-          const isImageGenRequest =
-            lowerQuery.startsWith("generate image") ||
-            lowerQuery.startsWith("create image") ||
-            lowerQuery.startsWith("draw") ||
-            lowerQuery.startsWith("/image") ||
-            lowerQuery.startsWith("make a photo") ||
-            lowerQuery.startsWith("create logo") ||
-            lowerQuery.startsWith("make poster") ||
-            lowerQuery.startsWith("make banner") ||
-            lowerQuery.startsWith("product mockup");
+          const chatId = remoteJid || "whatsapp_default";
+          const memory = getChatMemory(chatId);
 
-          if (isImageGenRequest) {
+          // Check if request is for Image Generation
+          if (isImageGenerationRequest(cleanQuery)) {
             try {
-              const imgPrompt = cleanQuery
-                .replace(/^generate image/i, "")
-                .replace(/^create image/i, "")
-                .replace(/^draw/i, "")
-                .replace(/^\/image/i, "")
-                .replace(/^make a photo/i, "")
-                .replace(/^create logo/i, "")
-                .replace(/^make poster/i, "")
-                .replace(/^make banner/i, "")
-                .replace(/^product mockup/i, "")
-                .trim();
+              const imgPrompt = extractImagePrompt(cleanQuery);
+              appendChatMemory(chatId, "user", cleanQuery);
 
               const imgResult = await generateImageWithProviders({
-                prompt: imgPrompt || "Futuristic masterpiece",
-                stylePreset: lowerQuery.includes("logo") ? "Vector Logo Art" : "Cyberpunk Neon",
+                prompt: imgPrompt || "Creative masterpiece artwork",
+                stylePreset: cleanQuery.toLowerCase().includes("logo") ? "Vector Logo Art" : "Cyberpunk Neon",
               });
+
+              appendChatMemory(chatId, "assistant", `[Generated Image for: ${imgPrompt}]`);
 
               await waSocketInstance.sendMessage(
                 remoteJid,
                 {
                   image: { url: imgResult.imageUrl },
-                  caption: `🎨 *Generated by Soka AI Studio* (SASTECH INC. | +231 88 988 3943 / +231 88 979 2996)\n\nPrompt: "${imgPrompt || "Futuristic artwork"}"`,
+                  caption: `Prompt: ${imgPrompt}`,
                 },
                 { quoted: msg }
               );
@@ -753,8 +854,6 @@ async function initWhatsAppBot() {
           }
 
           // Standard AI Text & Trading Conversation Reply
-          const chatId = remoteJid || "whatsapp_default";
-          const memory = getChatMemory(chatId);
           appendChatMemory(chatId, "user", cleanQuery || "Hello");
 
           const memoryContext = formatMemoryForPrompt(memory);
