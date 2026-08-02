@@ -10,7 +10,71 @@ import pino from "pino";
 dotenv.config();
 
 const makeWASocket = (baileysPackage as any).default || baileysPackage;
-const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, downloadMediaMessage } = baileysPackage as any;
+const {
+  DisconnectReason,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  downloadMediaMessage,
+  downloadContentFromMessage,
+} = baileysPackage as any;
+
+// Helper to safely unwrap WhatsApp messages (ViewOnce, Ephemeral, DocumentWithCaption, PTT)
+function extractMediaAndText(msg: any) {
+  let m = msg?.message;
+  if (!m) return null;
+
+  // Unpack wrappers recursively
+  if (m.ephemeralMessage?.message) m = m.ephemeralMessage.message;
+  if (m.viewOnceMessage?.message) m = m.viewOnceMessage.message;
+  if (m.viewOnceMessageV2?.message) m = m.viewOnceMessageV2.message;
+  if (m.documentWithCaptionMessage?.message) m = m.documentWithCaptionMessage.message;
+
+  const audioMessage = m.audioMessage || m.pttMessage;
+  const imageMessage = m.imageMessage;
+  const documentMessage = m.documentMessage;
+  const videoMessage = m.videoMessage;
+
+  const text =
+    m.conversation ||
+    m.extendedTextMessage?.text ||
+    m.imageMessage?.caption ||
+    m.videoMessage?.caption ||
+    m.documentMessage?.caption ||
+    "";
+
+  return { unwrappedMessage: m, audioMessage, imageMessage, documentMessage, videoMessage, text };
+}
+
+// Resilient Baileys Media Downloader with dual fallback
+async function downloadBaileysMediaBuffer(
+  msg: any,
+  type: "audio" | "image" | "document" | "video",
+  mediaObj: any
+): Promise<Buffer> {
+  // Primary attempt: Baileys downloadMediaMessage
+  try {
+    const buf = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
+    if (buf && buf.length > 0) return buf;
+  } catch (err1) {
+    console.warn(`[Soka AI] downloadMediaMessage primary fail for ${type}, trying downloadContentFromMessage stream...`, err1);
+  }
+
+  // Secondary attempt: downloadContentFromMessage stream
+  try {
+    if (downloadContentFromMessage && mediaObj) {
+      const stream = await downloadContentFromMessage(mediaObj, type);
+      let buffer = Buffer.alloc(0);
+      for await (const chunk of stream) {
+        buffer = Buffer.concat([buffer, chunk]);
+      }
+      if (buffer && buffer.length > 0) return buffer;
+    }
+  } catch (err2) {
+    console.error(`[Soka AI] downloadContentFromMessage secondary fail for ${type}:`, err2);
+  }
+
+  throw new Error(`Failed to extract buffer for ${type}`);
+}
 
 const app = express();
 app.use(express.json({ limit: "50mb" }));
@@ -163,8 +227,14 @@ async function generateAIResponseWithFallback(
   imageBase64?: { data: string; mimeType: string }
 ): Promise<{ text: string; modelUsed: string }> {
   
-  // A) Gemini Multi-Model Primary Attempt
-  const candidateGeminiModels = ["gemini-3.6-flash", "gemini-3.1-flash-lite-image"];
+  // A) Gemini Multi-Model Primary Attempt (Supports native Audio, Vision, Video, Documents, and Text)
+  const candidateGeminiModels = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-2.5-pro",
+    "gemini-1.5-pro",
+  ];
   const geminiKeys = [
     process.env.GEMINI_API_KEY,
     process.env.GEMINI_API_KEY_2,
@@ -182,11 +252,13 @@ async function generateAIResponseWithFallback(
         });
 
         const contentsParts: any[] = [];
-        if (imageBase64) {
+        if (imageBase64 && imageBase64.data) {
+          // Clean MIME type (remove parameters like "; codecs=opus")
+          const cleanMime = (imageBase64.mimeType || "image/jpeg").split(";")[0].trim().toLowerCase();
           contentsParts.push({
             inlineData: {
               data: imageBase64.data,
-              mimeType: imageBase64.mimeType || "image/jpeg",
+              mimeType: cleanMime,
             },
           });
         }
@@ -224,6 +296,44 @@ async function generateAIResponseWithFallback(
       } catch (err: any) {
         console.warn(`[Soka AI] Gemini ${model} failover: ${err?.message || err}`);
       }
+    }
+  }
+
+  // B) OpenAI API Provider Attempt (Vision & Text)
+  if (process.env.OPENAI_API_KEY) {
+    try {
+      const cleanMime = imageBase64?.mimeType ? imageBase64.mimeType.split(";")[0].trim().toLowerCase() : "image/jpeg";
+      const isVision = imageBase64 && imageBase64.data && cleanMime.startsWith("image/");
+      const userContent = isVision
+        ? [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: `data:${cleanMime};base64,${imageBase64.data}` } },
+          ]
+        : prompt;
+
+      const openAiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: isVision ? "gpt-4o-mini" : "gpt-4o-mini",
+          messages: [
+            ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
+            { role: "user", content: userContent },
+          ],
+        }),
+      });
+      const openAiData = await openAiRes.json();
+      if (openAiData?.choices?.[0]?.message?.content) {
+        return {
+          text: openAiData.choices[0].message.content,
+          modelUsed: "OpenAI GPT-4o Engine",
+        };
+      }
+    } catch (err) {
+      console.warn("[Soka AI] OpenAI Failover Error:", err);
     }
   }
 
@@ -639,15 +749,23 @@ async function initWhatsAppBot() {
         const remoteJid = msg.key.remoteJid;
         const isGroup = remoteJid?.endsWith("@g.us");
 
-        // 1) Audio / Voice Note Handling (Any Language)
-        if (msg.message.audioMessage) {
+        const extracted = extractMediaAndText(msg);
+        if (!extracted) continue;
+
+        const { unwrappedMessage, audioMessage, imageMessage, documentMessage, text: rawText } = extracted;
+
+        // 1) Audio / Voice Note Handling (Any Language & Voice Recording)
+        if (audioMessage) {
           try {
             const chatId = remoteJid || "whatsapp_default";
             const memory = getChatMemory(chatId);
             appendChatMemory(chatId, "user", "[Voice Note Sent by User]");
 
-            const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
+            const buffer = await downloadBaileysMediaBuffer(msg, "audio", audioMessage);
             const base64Audio = buffer.toString("base64");
+
+            // Clean MIME type (e.g., "audio/ogg; codecs=opus" -> "audio/ogg")
+            const cleanMime = (audioMessage.mimetype || "audio/ogg").split(";")[0].trim().toLowerCase();
 
             const memoryContext = formatMemoryForPrompt(memory);
             const voiceInstruction = `${GLOBAL_COMPANY_SYSTEM_PROMPT}
@@ -661,9 +779,9 @@ You are processing a voice message sent by the user in audio form.
 ${memoryContext ? `\nPrevious Conversation Context:\n${memoryContext}` : ""}`;
 
             const aiRes = await generateAIResponseWithFallback(
-              "Process and answer this voice message directly in the user's spoken language.",
+              "Listen carefully to this voice recording, transcribe the user's speech accurately, identify what they said or asked, and reply directly in the exact same language they spoke.",
               voiceInstruction,
-              { data: base64Audio, mimeType: msg.message.audioMessage.mimetype || "audio/ogg" }
+              { data: base64Audio, mimeType: cleanMime }
             );
 
             appendChatMemory(chatId, "assistant", aiRes.text);
@@ -683,18 +801,17 @@ ${memoryContext ? `\nPrevious Conversation Context:\n${memoryContext}` : ""}`;
         }
 
         // 2) Document & PDF Analysis Handling
-        if (msg.message.documentMessage || msg.message.documentWithCaptionMessage) {
+        if (documentMessage) {
           try {
             const chatId = remoteJid || "whatsapp_default";
             const memory = getChatMemory(chatId);
 
-            const doc = msg.message.documentMessage || msg.message.documentWithCaptionMessage?.message?.documentMessage;
-            const caption = doc?.caption || "Analyze this document thoroughly.";
-            const fileName = doc?.fileName || "Document.pdf";
+            const caption = rawText || documentMessage.caption || "Analyze this document thoroughly.";
+            const fileName = documentMessage.fileName || "Document.pdf";
 
             appendChatMemory(chatId, "user", `[Document Sent by User]: ${fileName} - ${caption}`);
 
-            const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
+            const buffer = await downloadBaileysMediaBuffer(msg, "document", documentMessage);
             const docText = buffer.toString("utf-8").replace(/[^\x20-\x7E\n\r\t]/g, " ");
 
             const prompt = `Analyze this document file named "${fileName}":\n\nContent snippet:\n${docText.substring(0, 4000)}\n\nUser Question/Caption: ${caption}`;
@@ -718,22 +835,23 @@ ${memoryContext ? `\nPrevious Conversation Context:\n${memoryContext}` : ""}`;
         }
 
         // 3) Image Understanding / Vision Photo & Editing
-        if (msg.message.imageMessage) {
+        if (imageMessage) {
           try {
             const chatId = remoteJid || "whatsapp_default";
             const memory = getChatMemory(chatId);
 
-            const caption = msg.message.imageMessage.caption || "Analyze this image.";
+            const caption = rawText || imageMessage.caption || "Analyze this image.";
             const lowerCaption = caption.toLowerCase();
 
-            const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: pino({ level: "silent" }) });
+            const buffer = await downloadBaileysMediaBuffer(msg, "image", imageMessage);
             const base64Image = buffer.toString("base64");
+            const cleanMime = (imageMessage.mimetype || "image/jpeg").split(";")[0].trim().toLowerCase();
 
             // Check if photo edit, style transfer, or image generation requested from photo
             if (lowerCaption.includes("remove background") || lowerCaption.includes("remove bg") || lowerCaption.includes("style transfer") || lowerCaption.includes("edit")) {
               const imgResult = await generateImageWithProviders({
                 prompt: caption,
-                referenceImage: `data:image/jpeg;base64,${base64Image}`,
+                referenceImage: `data:${cleanMime};base64,${base64Image}`,
                 stylePreset: lowerCaption.includes("style transfer") ? "Studio Ghibli Anime" : "Cyberpunk Neon",
               });
 
@@ -775,7 +893,7 @@ ${memoryContext ? `\nPrevious Conversation Context:\n${memoryContext}` : ""}`;
               const aiRes = await generateAIResponseWithFallback(
                 caption,
                 visionInstruction,
-                { data: base64Image, mimeType: msg.message.imageMessage.mimetype || "image/jpeg" }
+                { data: base64Image, mimeType: cleanMime }
               );
 
               appendChatMemory(chatId, "assistant", aiRes.text);
@@ -797,6 +915,7 @@ ${memoryContext ? `\nPrevious Conversation Context:\n${memoryContext}` : ""}`;
 
         // 4) Text Message Handling
         const text =
+          rawText ||
           msg.message.conversation ||
           msg.message.extendedTextMessage?.text ||
           "";
