@@ -96,12 +96,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     onClose();
   };
 
-  const handleAdminShortcut = () => {
-    setName('Aki Sokpah (Admin)');
-    setEmail('aki.sokpah.link@gmail.com');
-    setPassword('admin123');
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
       <div className="relative w-full max-w-md bg-[#080d1a] border border-cyan-500/30 rounded-3xl p-6 sm:p-8 shadow-[0_0_50px_rgba(6,182,212,0.2)] text-slate-100">
@@ -127,23 +121,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <p className="text-xs text-slate-400 mt-1">
             Sign in to synchronize multi-model chats, documents & WhatsApp bot features.
           </p>
-        </div>
-
-        {/* Admin Shortcut Banner */}
-        <div className="mb-4 p-3 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-purple-400 flex-shrink-0" />
-            <span className="text-xs text-purple-200">
-              Admin Access: <code className="text-cyan-300">aki.sokpah.link@gmail.com</code>
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={handleAdminShortcut}
-            className="text-[11px] font-semibold px-2 py-1 rounded bg-purple-500/20 hover:bg-purple-500/40 text-purple-300 transition-colors"
-          >
-            Fill Admin
-          </button>
         </div>
 
         {/* Google Authentication Button */}
